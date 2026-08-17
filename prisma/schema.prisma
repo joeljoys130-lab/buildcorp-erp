@@ -36,36 +36,80 @@ model User {
   isPhoneVerified    Boolean  @default(false)
   preferredOtpMethod String   @default("email")
   lastOtpMethod      String?
+  organizationId     String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }
 
+// ── MULTI-TENANCY & SESSION MODELS ───────────────────────────────────────────
 
-// ── AUTH ─────────────────────────────────────────────────────────────────────
+model Organization {
+  id        String   @id @default(cuid()) @map("_id")
+  name      String
+  slug      String   @unique
+  plan      String   @default("PRO")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model OrganizationMember {
+  id             String   @id @default(cuid()) @map("_id")
+  organizationId String
+  userId         String
+  role           String   @default("ADMIN")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@index([organizationId])
+}
+
+model Session {
+  id        String    @id @default(cuid()) @map("_id")
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// ── AUTH & TELEMETRY ─────────────────────────────────────────────────────────
 
 model AuditLog {
-  id        String   @id @default(cuid()) @map("_id")
-  username  String
-  action    String
-  entity    String
-  entityId  String?
-  details   String?
-  userId    String?
-  timestamp DateTime @default(now())
+  id             String   @id @default(cuid()) @map("_id")
+  organizationId String?
+  username       String
+  action         String
+  entity         String
+  entityId       String?
+  details        String?
+  userId         String?
+  timestamp      DateTime @default(now())
+
+  @@index([organizationId])
 }
 
 model Notification {
-  id        String   @id @default(cuid()) @map("_id")
-  type      String
-  message   String
-  isRead    Boolean  @default(false)
-  createdAt DateTime @default(now())
+  id             String   @id @default(cuid()) @map("_id")
+  organizationId String?
+  type           String
+  message        String
+  isRead         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
 }
 
 // ── MODULE 1 — CEMENT LOAD ────────────────────────────────────────────────────
 
 model CementLoad {
   id                        String    @id @default(cuid()) @map("_id")
+  organizationId            String?
   ownerEmail                String
   purchasedFrom             String
   cementCompany             String
@@ -93,12 +137,16 @@ model CementLoad {
   paymentBalanceAmount      Float?
   paymentRemarks            String?
   deletedAt                 DateTime?
+
+  @@index([ownerEmail])
+  @@index([organizationId])
 }
 
 // ── MODULE 2 — ENTRY (CONTRACT WORK) ─────────────────────────────────────────
 
 model Entry {
   id                               String    @id @default(cuid()) @map("_id")
+  organizationId            String?
   ownerEmail                       String
   workName                         String
   amount                           Float
@@ -130,12 +178,16 @@ model Entry {
   createdAt                        DateTime  @default(now())
   updatedAt                        DateTime  @updatedAt
   deletedAt                        DateTime?
+
+  @@index([ownerEmail])
+  @@index([organizationId])
 }
 
 // ── MODULE 3 — STOCK REGISTER ─────────────────────────────────────────────────
 
 model StockRegisterItem {
   id             String   @id @default(cuid()) @map("_id")
+  organizationId String?
   ownerEmail     String
   materialName   String
   inBarrel       Int      @default(0)
@@ -144,12 +196,16 @@ model StockRegisterItem {
   usedInTonne    Float    @default(0)
   balanceInTonne Float    @default(0)
   updatedAt      DateTime @updatedAt
+
+  @@index([ownerEmail])
+  @@index([organizationId])
 }
 
 // ── MODULE 4 — SITE MATERIALS ─────────────────────────────────────────────────
 
 model SiteMaterial {
   id                     String    @id @default(cuid()) @map("_id")
+  organizationId         String?
   ownerEmail             String
   entryId                String
   type                   String
@@ -162,37 +218,45 @@ model SiteMaterial {
   totalQuantityInSite    Float
   createdAt              DateTime  @default(now())
   deletedAt              DateTime?
+
+  @@index([ownerEmail])
+  @@index([organizationId])
 }
 
 // ── MODULE 5 — PRIVATE WORK ───────────────────────────────────────────────────
 
 model PrivateWork {
-  id                   String    @id @default(cuid()) @map("_id")
-  ownerEmail           String
-  workName             String
-  approxAmount         Float
-  location             String
+  id                    String    @id @default(cuid()) @map("_id")
+  organizationId        String?
+  ownerEmail            String
+  workName              String
+  approxAmount          Float
+  location              String
   relatedToContractWork String?
-  siteVisitDate        DateTime
-  roadWorkNature       String
-  completedDate        DateTime
-  advanceReceived      Float
+  siteVisitDate         DateTime
+  roadWorkNature        String
+  completedDate         DateTime
+  advanceReceived       Float
   approxFinalWorkAmount Float
-  paymentReceived      Float     @default(0)
-  paymentBalance       Float     @default(0)
-  remarks              String?
-  gstApplicable        Boolean   @default(false)
-  createdAt            DateTime  @default(now())
-  workType             String?
-  finalWorkAmount      Float?
-  completionDate       DateTime?
-  deletedAt            DateTime?
+  paymentReceived       Float     @default(0)
+  paymentBalance        Float     @default(0)
+  remarks               String?
+  gstApplicable         Boolean   @default(false)
+  createdAt             DateTime  @default(now())
+  workType              String?
+  finalWorkAmount       Float?
+  completionDate        DateTime?
+  deletedAt             DateTime?
+
+  @@index([ownerEmail])
+  @@index([organizationId])
 }
 
 // ── MODULE 6 — TAR LOAD ───────────────────────────────────────────────────────
 
 model TarLoad {
   id                        String    @id @default(cuid()) @map("_id")
+  organizationId            String?
   ownerEmail                String
   purchasedFrom             String
   item                      String
@@ -220,12 +284,16 @@ model TarLoad {
   paymentBalanceAmount      Float?
   paymentRemarks            String?
   deletedAt                 DateTime?
+
+  @@index([ownerEmail])
+  @@index([organizationId])
 }
 
 // ── MODULE 7 — WORK BASED ENTRY ───────────────────────────────────────────────
 
 model WorkBasedEntry {
   id                    String   @id @default(cuid()) @map("_id")
+  organizationId        String?
   ownerEmail            String
   entryId               String
   itemSlNo              String
@@ -235,17 +303,24 @@ model WorkBasedEntry {
   totalAmountPerItem    Float
   itemUnit              String
   createdAt             DateTime @default(now())
+
+  @@index([ownerEmail])
+  @@index([organizationId])
 }
 
 // ── MODULE 11 — EXPENSE ───────────────────────────────────────────────────────
 
 model Expense {
-  id          String    @id @default(cuid()) @map("_id")
-  ownerEmail  String
-  workId      String
-  date        DateTime
-  description String
-  amount      Float
-  createdAt   DateTime  @default(now())
-  deletedAt   DateTime?
+  id             String    @id @default(cuid()) @map("_id")
+  organizationId String?
+  ownerEmail     String
+  workId         String
+  date           DateTime
+  description    String
+  amount         Float
+  createdAt      DateTime  @default(now())
+  deletedAt      DateTime?
+
+  @@index([ownerEmail])
+  @@index([organizationId])
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { dbService } from '@/lib/db-service';
-import { verifyAccessToken } from '@/lib/auth/jwt';
+import { getTenantContextFromToken, assertPermission } from '@/lib/auth/tenant';
 
 export async function GET(
   request: Request,
@@ -13,15 +13,20 @@ export async function GET(
     const cookieStore = await cookies();
     const token = cookieStore.get('auth_token')?.value;
     if (!token) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     }
-    const payload = verifyAccessToken(token) as any;
-    if (!payload?.email) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
-    const ownerEmail = payload.email as string;
 
-    // Fetch entries and private works
+    const tenantCtx = await getTenantContextFromToken(token);
+    if (!tenantCtx) {
+      return NextResponse.json({ error: 'Invalid or expired session' }, { status: 401 });
+    }
+
+    // Check RBAC permission for financial profit calculations
+    assertPermission(tenantCtx, 'EXPENSE_VIEW');
+
+    const ownerEmail = tenantCtx.email;
+
+    // Fetch entries and private works for this tenant
     const entries = (await dbService.getEntries(ownerEmail)) as any[];
     const privateWorks = await dbService.getPrivateWorks(ownerEmail);
 
@@ -42,7 +47,7 @@ export async function GET(
         agreedAmount = privateWork.approxFinalWorkAmount;
         gstApplicable = privateWork.gstApplicable;
       } else {
-        return NextResponse.json({ error: 'Work not found' }, { status: 404 });
+        return NextResponse.json({ error: 'Work not found or access denied' }, { status: 404 });
       }
     }
 
@@ -89,10 +94,10 @@ export async function GET(
       totalExpense,
       totalExpenseWithGST,
       overallProfit,
-      profitPercentage: Math.round(profitPercentage * 100) / 100 // Round to 2 decimal places
+      profitPercentage: Math.round(profitPercentage * 100) / 100
     });
   } catch (error: any) {
     console.error('Error calculating profit:', error);
-    return NextResponse.json({ error: 'Internal server error', details: error.message }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

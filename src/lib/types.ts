@@ -1,18 +1,38 @@
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  plan: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface OrganizationMember {
+  id: string;
+  organizationId: string;
+  userId: string;
+  role: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface User {
   id: string;
-  username: string;
+  username?: string;
   email: string;
   passwordHash?: string;
   name: string;
-  role: 'SUPER_ADMIN' | 'ADMIN' | 'MANAGER' | 'ACCOUNTANT' | 'SITE_ENGINEER' | 'STORE_MANAGER' | 'VIEWER';
+  role: string;
+  organizationId?: string;
   department?: string;
-  permissions: string[];
+  permissions?: string[];
   createdAt: Date;
   updatedAt: Date;
 }
 
 export interface AuditLog {
   id: string;
+  organizationId?: string;
   userId?: string;
   username: string;
   action: string;
@@ -24,6 +44,7 @@ export interface AuditLog {
 
 export interface Notification {
   id: string;
+  organizationId?: string;
   type: string;
   message: string;
   isRead: boolean;
@@ -33,6 +54,8 @@ export interface Notification {
 // MODULE 1 - CEMENT LOAD UPDATION
 export interface CementLoad {
   id: string;
+  organizationId?: string;
+  ownerEmail?: string;
   purchasedFrom: string;
   cementCompany: string;
   loadInTonne: number;
@@ -63,6 +86,8 @@ export interface CementLoad {
 // MODULE 2 - ENTRY / WORK STATUS
 export interface Entry {
   id: string;
+  organizationId?: string;
+  ownerEmail?: string;
   workName: string;
   amount: number;
   nameOfOffice: string;
@@ -97,6 +122,8 @@ export interface Entry {
 // MODULE 3 - STOCK REGISTER
 export interface StockRegisterItem {
   id: string;
+  organizationId?: string;
+  ownerEmail?: string;
   materialName: 'Cement' | 'RS1' | 'SS1' | 'VG30';
   inBarrel: number;
   inKg: number;
@@ -109,6 +136,8 @@ export interface StockRegisterItem {
 // MODULE 4 - SITE MATERIALS USED
 export interface SiteMaterial {
   id: string;
+  organizationId?: string;
+  ownerEmail?: string;
   entryId: string;
   type: 'to_deliver' | 'delivered';
   itemSlNo: string;
@@ -124,6 +153,8 @@ export interface SiteMaterial {
 // MODULE 5 - PRIVATE WORK
 export interface PrivateWork {
   id: string;
+  organizationId?: string;
+  ownerEmail?: string;
   workName: string;
   approxAmount: number;
   location: string;
@@ -146,6 +177,8 @@ export interface PrivateWork {
 // MODULE 6 - TAR LOAD
 export interface TarLoad {
   id: string;
+  organizationId?: string;
+  ownerEmail?: string;
   purchasedFrom: string;
   item: 'Cement' | 'RS1' | 'SS1' | 'VG30';
   quantityInKg: number;
@@ -176,6 +209,8 @@ export interface TarLoad {
 // MODULE 7 - WORK BASED ENTRY
 export interface WorkBasedEntry {
   id: string;
+  organizationId?: string;
+  ownerEmail?: string;
   entryId: string;
   itemSlNo: string;
   itemName: string;
@@ -189,6 +224,8 @@ export interface WorkBasedEntry {
 // MODULE 11 - EXPENSE
 export interface Expense {
   id: string;
+  organizationId?: string;
+  ownerEmail?: string;
   workId: string;
   date: Date;
   description: string;

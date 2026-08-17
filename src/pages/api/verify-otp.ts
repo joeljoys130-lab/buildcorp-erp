@@ -119,18 +119,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   }
 
-  // Update preferred/last OTP method in User profile
-  await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      lastOtpMethod: selectedMethod,
-      ...(selectedMethod === 'phone' ? { isPhoneVerified: true } : {}),
-    },
-  });
+  // Update preferred/last OTP method in User profile (non-critical)
+  let userData = user;
+  try {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        lastOtpMethod: selectedMethod,
+        ...(selectedMethod === 'phone' ? { isPhoneVerified: true } : {}),
+      },
+    });
 
-  // Re-fetch user in case isPhoneVerified or preferredOtpMethod was updated
-  const updatedUser = await prisma.user.findUnique({ where: { id: user.id } });
-  const userData = updatedUser || user;
+    // Re-fetch user in case isPhoneVerified or preferredOtpMethod was updated
+    const updatedUser = await prisma.user.findUnique({ where: { id: user.id } });
+    if (updatedUser) {
+      userData = updatedUser;
+    }
+  } catch (dbErr) {
+    console.warn('⚠️  DB unavailable in verifyOtp post-update, continuing login with stale user data:', (dbErr as Error).message?.slice(0, 120));
+  }
+
 
   // Issue JWT (1 hour expiry)
   const token = generateAccessToken({ id: userData.id, email: userData.email, name: userData.name, role: userData.role });

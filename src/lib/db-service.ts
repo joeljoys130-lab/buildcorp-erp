@@ -26,11 +26,15 @@ function parseDates<T extends Record<string, any>>(data: T, keys: (keyof T)[]): 
   if (!data) return data;
   const clone = { ...data };
   for (const key of keys) {
-    if (clone[key] !== undefined && clone[key] !== null) {
-      if (typeof clone[key] === 'string' && clone[key] !== '') {
+    if (clone[key] === '') {
+      clone[key] = null as any;
+    } else if (clone[key] !== undefined && clone[key] !== null) {
+      if (typeof clone[key] === 'string') {
         const d = new Date(clone[key]);
         if (!isNaN(d.getTime())) {
           clone[key] = d as any;
+        } else {
+          clone[key] = null as any;
         }
       }
     }
@@ -38,12 +42,13 @@ function parseDates<T extends Record<string, any>>(data: T, keys: (keyof T)[]): 
   return clone;
 }
 
-/** READ helper — try Prisma; return empty array on network error. */
+/** READ helper — executes Prisma query and logs warnings if error occurs. */
 async function readDb<T>(dbFn: () => Promise<T>, fallback: () => T): Promise<T> {
   try {
     return serialize(await dbFn());
   } catch (err) {
-    console.warn('⚠️  DB unavailable:', (err as Error).message?.slice(0, 120));
+    console.error('⚠️  DB Error:', (err as Error).message?.slice(0, 200));
+    // If running in development/fallback, return fallback
     return serialize(fallback());
   }
 }
@@ -51,6 +56,17 @@ async function readDb<T>(dbFn: () => Promise<T>, fallback: () => T): Promise<T> 
 /** WRITE helper — always uses Prisma, throws on failure. */
 async function writeDb<T>(dbFn: () => Promise<T>): Promise<T> {
   return serialize(await dbFn());
+}
+
+/** Helper to construct tenant isolation filter */
+function buildTenantWhere(organizationId?: string, ownerEmail?: string): Record<string, any> {
+  if (organizationId) {
+    return { organizationId };
+  }
+  if (ownerEmail) {
+    return { ownerEmail };
+  }
+  return { ownerEmail: 'unauthenticated@invalid' };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -64,51 +80,68 @@ class DbService {
   async recalculateStockRegister(ownerEmail: string): Promise<void> {
     const defaults = ['Cement', 'RS1', 'SS1', 'VG30'] as const;
     
-    // Ensure default stock items exist
-    for (const materialName of defaults) {
-      const exists = await prisma.stockRegisterItem.findFirst({ where: { ownerEmail, materialName } });
-      if (!exists) {
-        await prisma.stockRegisterItem.create({
-          data: { ownerEmail, materialName, inBarrel: 0, inKg: 0, inTonne: 0, usedInTonne: 0, balanceInTonne: 0 },
-        });
-      }
+    // Ensure default stock items exist in batch
+    const existingItems = await prisma.stockRegisterItem.findMany({
+      where: { ownerEmail }
+    });
+    
+    const existingMap = new Map(existingItems.map(item => [item.materialName, item]));
+    const missing = defaults.filter(d => !existingMap.has(d));
+    
+    if (missing.length > 0) {
+      await prisma.stockRegisterItem.createMany({
+        data: missing.map(materialName => ({
+          ownerEmail,
+          materialName,
+          inBarrel: 0,
+          inKg: 0,
+          inTonne: 0,
+          usedInTonne: 0,
+          balanceInTonne: 0
+        }))
+      });
+      // Refresh list of items
+      const refreshedItems = await prisma.stockRegisterItem.findMany({
+        where: { ownerEmail }
+      });
+      refreshedItems.forEach(item => existingMap.set(item.materialName, item));
     }
 
-    // Fetch all active cement loads (all are Cement)
-    const cementLoads = await prisma.cementLoad.findMany({
-      where: {
-        ownerEmail,
-        OR: [
-          { deletedAt: { isSet: false } },
-          { deletedAt: null }
-        ]
-      }
-    });
+    // Fetch all active loads and materials in parallel
+    const [cementLoads, tarLoads, siteMaterials] = await Promise.all([
+      prisma.cementLoad.findMany({
+        where: {
+          ownerEmail,
+          OR: [
+            { deletedAt: { isSet: false } },
+            { deletedAt: null }
+          ]
+        }
+      }),
+      prisma.tarLoad.findMany({
+        where: {
+          ownerEmail,
+          OR: [
+            { deletedAt: { isSet: false } },
+            { deletedAt: null }
+          ]
+        }
+      }),
+      prisma.siteMaterial.findMany({
+        where: {
+          ownerEmail,
+          type: 'delivered',
+          OR: [
+            { deletedAt: { isSet: false } },
+            { deletedAt: null }
+          ]
+        }
+      })
+    ]);
 
-    // Fetch all active tar loads (RS1, SS1, VG30, etc.)
-    const tarLoads = await prisma.tarLoad.findMany({
-      where: {
-        ownerEmail,
-        OR: [
-          { deletedAt: { isSet: false } },
-          { deletedAt: null }
-        ]
-      }
-    });
-
-    // Fetch all active site materials used
-    const siteMaterials = await prisma.siteMaterial.findMany({
-      where: {
-        ownerEmail,
-        type: 'delivered',
-        OR: [
-          { deletedAt: { isSet: false } },
-          { deletedAt: null }
-        ]
-      }
-    });
-
-    // Calculate for each material
+    // Calculate updates and perform them in parallel
+    const updatePromises: Promise<any>[] = [];
+    
     for (const materialName of defaults) {
       let inTonne = 0;
       let inKg = 0;
@@ -145,11 +178,27 @@ class DbService {
 
       const balanceInTonne = inTonne - usedInTonne;
 
-      // Update Stock Register Item
-      await prisma.stockRegisterItem.updateMany({
-        where: { ownerEmail, materialName },
-        data: { inBarrel, inKg, inTonne, usedInTonne, balanceInTonne }
-      });
+      // Only update if the values have actually changed
+      const current = existingMap.get(materialName);
+      if (
+        !current ||
+        current.inBarrel !== inBarrel ||
+        current.inKg !== inKg ||
+        current.inTonne !== inTonne ||
+        current.usedInTonne !== usedInTonne ||
+        current.balanceInTonne !== balanceInTonne
+      ) {
+        updatePromises.push(
+          prisma.stockRegisterItem.updateMany({
+            where: { ownerEmail, materialName },
+            data: { inBarrel, inKg, inTonne, usedInTonne, balanceInTonne }
+          })
+        );
+      }
+    }
+
+    if (updatePromises.length > 0) {
+      await Promise.all(updatePromises);
     }
   }
 
@@ -180,7 +229,7 @@ class DbService {
     const created = await writeDb(() => prisma.cementLoad.create({
       data: { ...parsed, balanceAmount, ownerEmail } as any,
     })) as unknown as CementLoad;
-    await this.recalculateStockRegister(ownerEmail);
+    this.recalculateStockRegister(ownerEmail).catch(err => console.error("Recalculate stock register error:", err));
     return created;
   }
 
@@ -201,7 +250,7 @@ class DbService {
       }
       return prisma.cementLoad.update({ where: { id }, data: payload });
     }) as unknown as CementLoad | null;
-    await this.recalculateStockRegister(ownerEmail);
+    this.recalculateStockRegister(ownerEmail).catch(err => console.error("Recalculate stock register error:", err));
     return updated;
   }
 
@@ -213,7 +262,7 @@ class DbService {
       });
       return true;
     });
-    await this.recalculateStockRegister(ownerEmail);
+    this.recalculateStockRegister(ownerEmail).catch(err => console.error("Recalculate stock register error:", err));
     return result;
   }
 
@@ -340,7 +389,7 @@ class DbService {
         data: { ...data, balanceQuantityInCft, totalQuantityInSite, ownerEmail } as any,
       });
     }) as unknown as SiteMaterial;
-    await this.recalculateStockRegister(ownerEmail);
+    this.recalculateStockRegister(ownerEmail).catch(err => console.error("Recalculate stock register error:", err));
     return created;
   }
 
@@ -361,7 +410,7 @@ class DbService {
       }
       return prisma.siteMaterial.update({ where: { id }, data: payload });
     }) as unknown as SiteMaterial | null;
-    await this.recalculateStockRegister(ownerEmail);
+    this.recalculateStockRegister(ownerEmail).catch(err => console.error("Recalculate stock register error:", err));
     return updated;
   }
 
@@ -373,7 +422,7 @@ class DbService {
       });
       return true;
     });
-    await this.recalculateStockRegister(ownerEmail);
+    this.recalculateStockRegister(ownerEmail).catch(err => console.error("Recalculate stock register error:", err));
     return result;
   }
 
@@ -462,7 +511,7 @@ class DbService {
     const created = await writeDb(() => prisma.tarLoad.create({
       data: { ...parsed, balanceToBePaid, ownerEmail } as any,
     })) as unknown as TarLoad;
-    await this.recalculateStockRegister(ownerEmail);
+    this.recalculateStockRegister(ownerEmail).catch(err => console.error("Recalculate stock register error:", err));
     return created;
   }
 
@@ -483,7 +532,7 @@ class DbService {
       }
       return prisma.tarLoad.update({ where: { id }, data: payload });
     }) as unknown as TarLoad | null;
-    await this.recalculateStockRegister(ownerEmail);
+    this.recalculateStockRegister(ownerEmail).catch(err => console.error("Recalculate stock register error:", err));
     return updated;
   }
 
@@ -495,7 +544,7 @@ class DbService {
       });
       return true;
     });
-    await this.recalculateStockRegister(ownerEmail);
+    this.recalculateStockRegister(ownerEmail).catch(err => console.error("Recalculate stock register error:", err));
     return result;
   }
 

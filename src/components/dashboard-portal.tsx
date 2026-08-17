@@ -28,6 +28,7 @@ import {
   OfficeWiseWorkView, WorkStatusUpdationView, ExpenseUpdationView,
   ProfitCalculationView
 } from "./views/modules";
+import type { CementLoad } from "@/lib/types";
 
 interface DashboardPortalProps {
   initialUser: any;
@@ -47,7 +48,7 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
   };
 
   // Modular Data States
-  const [cementLoads, setCementLoads] = useState(initialData.cementLoads || []);
+  const [cementLoads, setCementLoads] = useState<CementLoad[]>(initialData.cementLoads || []);
   const [entries, setEntries] = useState(initialData.entries || []);
   const [stockRegister, setStockRegister] = useState(initialData.stockRegister || []);
   const [siteMaterials, setSiteMaterials] = useState(initialData.siteMaterials || []);
@@ -72,6 +73,16 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
       console.error("Failed to refresh dashboard data", e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Targeted refresh — only re-fetches cement loads (fast, ~1 query)
+  const refreshCementLoads = async () => {
+    try {
+      const data = await getCementLoadsAction();
+      setCementLoads(data || []);
+    } catch (e) {
+      console.error("Failed to refresh cement loads", e);
     }
   };
 
@@ -197,14 +208,25 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
           )}
 
           {activeTab === "cement-load" && (
-                      <CementLoadView
-            cementLoads={cementLoads}
-            onRefresh={refreshAllStates}
-            onCreateCementLoad={createCementLoadAction}
-            onUpdateCementLoad={updateCementLoadAction}
-            onDeleteCementLoad={deleteCementLoadAction}
-            onNavigate={setActiveTab}
-          />
+            <CementLoadView
+              cementLoads={cementLoads}
+              onRefresh={refreshCementLoads}
+              onCreateCementLoad={createCementLoadAction}
+              onUpdateCementLoad={updateCementLoadAction}
+              onDeleteCementLoad={deleteCementLoadAction}
+              onOptimisticUpdate={(updated) =>
+                setCementLoads((prev) => {
+                  const idx = prev.findIndex((c) => c.id === updated.id);
+                  if (idx === -1) {
+                    // New record (create path): prepend to parent state
+                    return [updated, ...prev];
+                  }
+                  // Existing record (edit path): update in-place
+                  return prev.map((c) => c.id === updated.id ? { ...c, ...updated } : c);
+                })
+              }
+              onNavigate={setActiveTab}
+            />
           )}
 
           {activeTab === "entry" && (

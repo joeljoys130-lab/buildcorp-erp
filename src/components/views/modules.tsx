@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { 
   Plus, Search, FileDown, Edit2, Trash2, Calendar, FileText, CheckCircle, 
   AlertCircle, X, ChevronRight, Filter, Printer
@@ -41,12 +41,42 @@ const formatDate = (date: any): string => {
 // ==========================================
 // MODULE 1 – CEMENT LOAD UPDATION
 // ==========================================
+
+// Single form state object — replacing 22 individual useState calls.
+// This is the key fix: clearForm() now calls ONE setState instead of 22,
+// eliminating the multi-render cascade that was blocking the browser from
+// painting the optimistic row.
+const CEMENT_FORM_EMPTY = {
+  purchasedFrom: "",
+  cementCompany: "",
+  loadInTonne: 0,
+  loadInBags: 0,
+  amountPerLoad: 0,
+  paidAmount: 0,
+  purchaseDate: "",
+  buyerName: "",
+  invoiceNumber: "",
+  remarks: "",
+  currentStockDate: "",
+  currentStockQty: 0,
+  currentStockUsed: 0,
+  currentStockUsedAmount: 0,
+  currentStockBalanceAmount: 0,
+  paymentPartyName: "",
+  paymentBillAmount: 0,
+  paymentBillDate: "",
+  paymentPaidAmount: 0,
+  paymentRemarks: "",
+};
+type CementFormState = typeof CEMENT_FORM_EMPTY;
+
 export function CementLoadView({
   cementLoads,
   onRefresh,
   onCreateCementLoad,
   onUpdateCementLoad,
   onDeleteCementLoad,
+  onOptimisticUpdate,
   onNavigate
 }: {
   cementLoads: CementLoad[];
@@ -54,157 +84,202 @@ export function CementLoadView({
   onCreateCementLoad: (data: any) => Promise<any>;
   onUpdateCementLoad: (id: string, data: any) => Promise<any>;
   onDeleteCementLoad: (id: string) => Promise<any>;
+  onOptimisticUpdate?: (updatedItem: CementLoad) => void;
   onNavigate: (tab: string) => void;
 }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  
-  // Fields
-  const [purchasedFrom, setPurchasedFrom] = useState("");
-  const [cementCompany, setCementCompany] = useState("");
-  const [loadInTonne, setLoadInTonne] = useState(0);
-  const [loadInBags, setLoadInBags] = useState(0);
-  const [amountPerLoad, setAmountPerLoad] = useState(0);
-  const [paidAmount, setPaidAmount] = useState(0);
-  const [purchaseDate, setPurchaseDate] = useState("");
-  const [buyerName, setBuyerName] = useState("");
-  const [invoiceNumber, setInvoiceNumber] = useState("");
-  const [remarks, setRemarks] = useState("");
+  // Single form state object — ONE setState replaces 22 individual setters.
+  const [form, setForm] = useState<CementFormState>(CEMENT_FORM_EMPTY);
+  const setField = <K extends keyof CementFormState>(key: K, value: CementFormState[K]) =>
+    setForm(prev => ({ ...prev, [key]: value }));
 
-  // Current Stock Available
-  const [currentStockDate, setCurrentStockDate] = useState("");
-  const [currentStockQty, setCurrentStockQty] = useState(0);
-  const [currentStockUsed, setCurrentStockUsed] = useState(0);
-  const [currentStockUsedAmount, setCurrentStockUsedAmount] = useState(0);
-  const [currentStockBalanceAmount, setCurrentStockBalanceAmount] = useState(0);
-
-  // Payment Details
-  const [paymentPartyName, setPaymentPartyName] = useState("");
-  const [paymentBillAmount, setPaymentBillAmount] = useState(0);
-  const [paymentBillDate, setPaymentBillDate] = useState("");
-  const [paymentPaidAmount, setPaymentPaidAmount] = useState(0);
-  const [paymentRemarks, setPaymentRemarks] = useState("");
+  // Holds items that are pending server confirmation (e.g., newly added loads).
+  // These use temp IDs (e.g. "temp-abc123") that are replaced by the real DB
+  // ID when the server responds. We do NOT use a useEffect to clean these up
+  // based on cementLoads — that approach fails because temp IDs never match
+  // real MongoDB IDs.  Cleanup is handled explicitly inside handleSave.
+  const [pendingCementLoads, setPendingCementLoads] = useState<CementLoad[]>([]);
 
   // Search/Filter
   const [searchQuery, setSearchQuery] = useState("");
 
-  const clearForm = () => {
-    setPurchasedFrom("");
-    setCementCompany("");
-    setLoadInTonne(0);
-    setLoadInBags(0);
-    setAmountPerLoad(0);
-    setPaidAmount(0);
-    setPurchaseDate("");
-    setBuyerName("");
-    setInvoiceNumber("");
-    setRemarks("");
+  const displayedCementLoads = useMemo(() => {
+    const combined = [...pendingCementLoads, ...cementLoads];
+    if (!searchQuery) return combined;
+    const q = searchQuery.toLowerCase();
+    return combined.filter(c =>
+      (c.purchasedFrom?.toLowerCase() || "").includes(q) ||
+      (c.cementCompany?.toLowerCase() || "").includes(q)
+    );
+  }, [pendingCementLoads, cementLoads, searchQuery]);
 
-    setCurrentStockDate("");
-    setCurrentStockQty(0);
-    setCurrentStockUsed(0);
-    setCurrentStockUsedAmount(0);
-    setCurrentStockBalanceAmount(0);
+  // ONE setState call — clears the form instantly.
+  const clearForm = () => setForm(CEMENT_FORM_EMPTY);
 
-    setPaymentPartyName("");
-    setPaymentBillAmount(0);
-    setPaymentBillDate("");
-    setPaymentPaidAmount(0);
-    setPaymentRemarks("");
-  };
-
-  const handleSave = async (e: React.FormEvent) => {
+  const handleSave = (e: React.FormEvent) => {
+    const t0 = performance.now();
     e.preventDefault();
     if (isSaving) return;
     setIsSaving(true);
-    try {
-      const payload = {
-        purchasedFrom, cementCompany,
-        loadInTonne: Number(loadInTonne),
-        loadInBags: Number(loadInBags),
-        amountPerLoad: Number(amountPerLoad),
-        paidAmount: Number(paidAmount),
-        purchaseDate, buyerName, invoiceNumber, remarks,
 
-        // Current Stock Available
-        currentStockDate,
-        currentStockQty: Number(currentStockQty),
-        currentStockUsed: Number(currentStockUsed),
-        currentStockBalance: Number(currentStockQty - currentStockUsed),
-        currentStockUsedAmount: Number(currentStockUsedAmount),
-        currentStockBalanceAmount: Number(currentStockBalanceAmount),
+    const payload = {
+      purchasedFrom: form.purchasedFrom,
+      cementCompany: form.cementCompany,
+      loadInTonne: Number(form.loadInTonne),
+      loadInBags: Number(form.loadInBags),
+      amountPerLoad: Number(form.amountPerLoad),
+      paidAmount: Number(form.paidAmount),
+      purchaseDate: form.purchaseDate,
+      buyerName: form.buyerName,
+      invoiceNumber: form.invoiceNumber,
+      remarks: form.remarks,
+      currentStockDate: form.currentStockDate,
+      currentStockQty: Number(form.currentStockQty),
+      currentStockUsed: Number(form.currentStockUsed),
+      currentStockBalance: Number(form.currentStockQty - form.currentStockUsed),
+      currentStockUsedAmount: Number(form.currentStockUsedAmount),
+      currentStockBalanceAmount: Number(form.currentStockBalanceAmount),
+      paymentPartyName: form.paymentPartyName,
+      paymentBillAmount: Number(form.paymentBillAmount),
+      paymentBillDate: form.paymentBillDate,
+      paymentPaidAmount: Number(form.paymentPaidAmount),
+      paymentBalanceAmount: Number(form.paymentBillAmount - form.paymentPaidAmount),
+      paymentRemarks: form.paymentRemarks,
+    };
 
-        // Payment Details
-        paymentPartyName,
-        paymentBillAmount: Number(paymentBillAmount),
-        paymentBillDate,
-        paymentPaidAmount: Number(paymentPaidAmount),
-        paymentBalanceAmount: Number(paymentBillAmount - paymentPaidAmount),
-        paymentRemarks
-      };
+    // ── OPTIMISTIC UPDATE (synchronous, before any await) ──────────────────
+    // For CREATE: add a temporary row immediately.
+    // For UPDATE: update the existing row immediately via onOptimisticUpdate.
+    // Neither path waits for the network.
+    let optimisticId: string | null = null;
 
-      if (editingId) {
-        await onUpdateCementLoad(editingId, payload);
-      } else {
-        await onCreateCementLoad(payload);
-      }
-      clearForm();
-      setEditingId(null);
-      setShowForm(false);
-      onRefresh();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsSaving(false);
+    if (!editingId) {
+      optimisticId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      // Cast through unknown: payload.purchaseDate is a string (from the form)
+      // but CementLoad.purchaseDate is Date. The table only reads it via formatDate()
+      // which handles strings, so this is safe for the optimistic display.
+      const optimisticLoad = {
+        ...payload,
+        id: optimisticId,
+        // Derive fields that the server computes but the table needs immediately.
+        balanceAmount: Number(payload.amountPerLoad) - Number(payload.paidAmount),
+        createdAt: new Date(),
+        ownerEmail: "",   // not used in the table display
+        workId: null,
+      } as unknown as CementLoad;
+      setPendingCementLoads(prev => [optimisticLoad, ...prev]);
+    } else {
+      onOptimisticUpdate?.({ ...payload, id: editingId } as unknown as CementLoad);
     }
+
+    const editId = editingId;
+    const capturedOptimisticId = optimisticId;
+
+    // Close the form and reset UI state immediately — all in one synchronous batch.
+    clearForm();
+    setEditingId(null);
+    setShowForm(false);
+    setIsSaving(false);
+
+    console.log(`[PERF] UI closed in ${(performance.now() - t0).toFixed(1)}ms`);
+
+    // ── BACKGROUND SERVER REQUEST ──────────────────────────────────────────
+    // void (no await) — the browser has already painted the optimistic row.
+    // We do NOT call onRefresh() on success; the server returns the saved
+    // record directly which we use to reconcile the temp row.
+    void (async () => {
+      const t5 = performance.now();
+      try {
+        if (editId) {
+          // UPDATE path: server returns the saved record; replace the
+          // optimistically-updated row in the parent with the real data.
+          const saved = await onUpdateCementLoad(editId, payload);
+          console.log(`[PERF] Server update: ${(performance.now() - t5).toFixed(0)}ms`);
+          if (saved) {
+            onOptimisticUpdate?.(saved as unknown as CementLoad);
+          }
+        } else {
+          // CREATE path: server returns the new record with the real DB ID.
+          const saved = await onCreateCementLoad(payload);
+          console.log(`[PERF] Server create: ${(performance.now() - t5).toFixed(0)}ms`);
+          if (saved && capturedOptimisticId) {
+            // Inject the real record into the parent's cementLoads array.
+            // onOptimisticUpdate now handles inserts (ID not found → prepend).
+            onOptimisticUpdate?.(saved as unknown as CementLoad);
+            // Drop the temp row — the real record is now in cementLoads.
+            setPendingCementLoads(prev =>
+              prev.filter(item => item.id !== capturedOptimisticId)
+            );
+          } else if (capturedOptimisticId) {
+            // Server returned nothing useful; fall back to refresh to get real data.
+            setPendingCementLoads(prev =>
+              prev.filter(item => item.id !== capturedOptimisticId)
+            );
+            await onRefresh();
+          }
+        }
+      } catch (err) {
+        console.error('Save failed:', err);
+        // Roll back: remove the optimistic row on failure.
+        if (capturedOptimisticId) {
+          setPendingCementLoads(prev =>
+            prev.filter(item => item.id !== capturedOptimisticId)
+          );
+        }
+        alert('Failed to save cement load. Please try again.');
+        // Refresh to ensure displayed data matches the server.
+        await onRefresh();
+      }
+    })();
   };
 
-  const handleEdit = (load: CementLoad) => {
-    setEditingId(load.id);
-    setPurchasedFrom(load.purchasedFrom);
-    setCementCompany(load.cementCompany);
-    setLoadInTonne(load.loadInTonne);
-    setLoadInBags(load.loadInBags);
-    setAmountPerLoad(load.amountPerLoad);
-    setPaidAmount(load.paidAmount);
-    setPurchaseDate(formatDate(load.purchaseDate));
-    setBuyerName(load.buyerName);
-    setInvoiceNumber(load.invoiceNumber || "");
-    setRemarks(load.remarks || "");
-
-    setCurrentStockDate(formatDate(load.currentStockDate));
-    setCurrentStockQty(load.currentStockQty || 0);
-    setCurrentStockUsed(load.currentStockUsed || 0);
-    setCurrentStockUsedAmount(load.currentStockUsedAmount || 0);
-    setCurrentStockBalanceAmount(load.currentStockBalanceAmount || 0);
-
-    setPaymentPartyName(load.paymentPartyName || "");
-    setPaymentBillAmount(load.paymentBillAmount || 0);
-    setPaymentBillDate(formatDate(load.paymentBillDate));
-    setPaymentPaidAmount(load.paymentPaidAmount || 0);
-    setPaymentRemarks(load.paymentRemarks || "");
-
+  const handleEdit = (item: CementLoad) => {
+    setForm({
+      purchasedFrom: item.purchasedFrom,
+      cementCompany: item.cementCompany,
+      loadInTonne: item.loadInTonne,
+      loadInBags: item.loadInBags,
+      amountPerLoad: item.amountPerLoad,
+      paidAmount: item.paidAmount,
+      purchaseDate: formatDate(item.purchaseDate),
+      buyerName: item.buyerName,
+      invoiceNumber: item.invoiceNumber,
+      remarks: item.remarks ?? "",
+      currentStockDate: formatDate(item.currentStockDate),
+      currentStockQty: item.currentStockQty ?? 0,
+      currentStockUsed: item.currentStockUsed ?? 0,
+      currentStockUsedAmount: item.currentStockUsedAmount ?? 0,
+      currentStockBalanceAmount: item.currentStockBalanceAmount ?? 0,
+      paymentPartyName: item.paymentPartyName ?? "",
+      paymentBillAmount: item.paymentBillAmount ?? 0,
+      paymentBillDate: formatDate(item.paymentBillDate),
+      paymentPaidAmount: item.paymentPaidAmount ?? 0,
+      paymentRemarks: item.paymentRemarks ?? "",
+    });
+    setEditingId(item.id);
     setShowForm(true);
   };
 
   const handleDelete = async (id: string) => {
     if (confirm("Are you sure you want to delete this cement load?")) {
-      await onDeleteCementLoad(id);
-      onRefresh();
+      setPendingCementLoads(prev => prev.filter(c => c.id !== id));
+      try {
+        await onDeleteCementLoad(id);
+        onRefresh();
+      } catch (err) {
+        console.error('Delete failed:', err);
+        onRefresh();
+      }
     }
   };
 
-  const totalBags = cementLoads.reduce((sum, item) => sum + item.loadInBags, 0);
-  const totalTonne = cementLoads.reduce((sum, item) => sum + item.loadInTonne, 0);
-  const totalAmount = cementLoads.reduce((sum, item) => sum + item.amountPerLoad, 0);
-  const totalPaid = cementLoads.reduce((sum, item) => sum + item.paidAmount, 0);
+  const totalBags = displayedCementLoads.reduce((sum, item) => sum + item.loadInBags, 0);
+  const totalTonne = displayedCementLoads.reduce((sum, item) => sum + item.loadInTonne, 0);
+  const totalAmount = displayedCementLoads.reduce((sum, item) => sum + item.amountPerLoad, 0);
+  const totalPaid = displayedCementLoads.reduce((sum, item) => sum + item.paidAmount, 0);
   const totalBalance = totalAmount - totalPaid;
-
-  const filteredLoads = cementLoads.filter(c => 
-    c.purchasedFrom.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    c.cementCompany.toLowerCase().includes(searchQuery.toLowerCase())
-  );
 
   return (
     <div className="space-y-6">
@@ -274,7 +349,7 @@ export function CementLoadView({
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Purchased From</label>
               <input 
-                type="text" required value={purchasedFrom} onChange={(e) => setPurchasedFrom(e.target.value)}
+                type="text" required value={form.purchasedFrom} onChange={(e) => setField("purchasedFrom", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 placeholder="Vendor Name"
               />
@@ -282,7 +357,7 @@ export function CementLoadView({
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Cement Company</label>
               <input 
-                type="text" required value={cementCompany} onChange={(e) => setCementCompany(e.target.value)}
+                type="text" required value={form.cementCompany} onChange={(e) => setField("cementCompany", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 placeholder="e.g. UltraTech, ACC"
               />
@@ -290,28 +365,28 @@ export function CementLoadView({
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Purchased Date</label>
               <input 
-                type="date" required value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)}
+                type="date" required value={form.purchaseDate} onChange={(e) => setField("purchaseDate", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Load In Tonne</label>
               <input 
-                type="number" step="any" required value={loadInTonne === 0 ? "" : loadInTonne} onChange={(e) => setLoadInTonne(e.target.value === "" ? 0 : Number(e.target.value))}
+                type="number" step="any" required value={form.loadInTonne === 0 ? "" : form.loadInTonne} onChange={(e) => setField("loadInTonne", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Load In No. Of Pack</label>
               <input 
-                type="number" required value={loadInBags === 0 ? "" : loadInBags} onChange={(e) => setLoadInBags(e.target.value === "" ? 0 : Number(e.target.value))}
+                type="number" required value={form.loadInBags === 0 ? "" : form.loadInBags} onChange={(e) => setField("loadInBags", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Billing Name/Buyer</label>
               <input 
-                type="text" required value={buyerName} onChange={(e) => setBuyerName(e.target.value)}
+                type="text" required value={form.buyerName} onChange={(e) => setField("buyerName", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 placeholder="Buyer Name"
               />
@@ -319,7 +394,7 @@ export function CementLoadView({
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Invoice Number</label>
               <input 
-                type="text" required value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)}
+                type="text" required value={form.invoiceNumber} onChange={(e) => setField("invoiceNumber", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 placeholder="Invoice Number"
               />
@@ -327,27 +402,27 @@ export function CementLoadView({
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Amount Per Load</label>
               <input 
-                type="number" required value={amountPerLoad === 0 ? "" : amountPerLoad} onChange={(e) => setAmountPerLoad(e.target.value === "" ? 0 : Number(e.target.value))}
+                type="number" required value={form.amountPerLoad === 0 ? "" : form.amountPerLoad} onChange={(e) => setField("amountPerLoad", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Paid Amount</label>
               <input 
-                type="number" required value={paidAmount === 0 ? "" : paidAmount} onChange={(e) => setPaidAmount(e.target.value === "" ? 0 : Number(e.target.value))}
+                type="number" required value={form.paidAmount === 0 ? "" : form.paidAmount} onChange={(e) => setField("paidAmount", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Balance To Be Paid</label>
               <div className="w-full px-3 py-2 bg-neutral-50 border border-neutral-300 rounded text-xs font-mono font-bold text-black">
-                ₹{(amountPerLoad - paidAmount).toLocaleString()}
+                ₹{(form.amountPerLoad - form.paidAmount).toLocaleString()}
               </div>
             </div>
             <div className="col-span-1 md:col-span-3">
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Remarks</label>
               <textarea 
-                rows={2} value={remarks} onChange={(e) => setRemarks(e.target.value)}
+                rows={2} value={form.remarks} onChange={(e) => setField("remarks", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 placeholder="Additional notes"
               />
@@ -361,41 +436,41 @@ export function CementLoadView({
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Current Date</label>
                 <input 
-                  type="date" value={currentStockDate} onChange={(e) => setCurrentStockDate(e.target.value)}
+                  type="date" value={form.currentStockDate} onChange={(e) => setField("currentStockDate", e.target.value)}
                   className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 />
               </div>
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Stock</label>
                 <input 
-                  type="number" value={currentStockQty === 0 ? "" : currentStockQty} onChange={(e) => setCurrentStockQty(e.target.value === "" ? 0 : Number(e.target.value))}
+                  type="number" value={form.currentStockQty === 0 ? "" : form.currentStockQty} onChange={(e) => setField("currentStockQty", e.target.value === "" ? 0 : Number(e.target.value))}
                   className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
                 />
               </div>
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Used</label>
                 <input 
-                  type="number" value={currentStockUsed === 0 ? "" : currentStockUsed} onChange={(e) => setCurrentStockUsed(e.target.value === "" ? 0 : Number(e.target.value))}
+                  type="number" value={form.currentStockUsed === 0 ? "" : form.currentStockUsed} onChange={(e) => setField("currentStockUsed", e.target.value === "" ? 0 : Number(e.target.value))}
                   className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
                 />
               </div>
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Balance</label>
                 <div className="w-full px-3 py-2 bg-neutral-50 border border-neutral-300 rounded text-xs font-mono font-bold text-black">
-                  {(currentStockQty - currentStockUsed).toLocaleString()}
+                  {(form.currentStockQty - form.currentStockUsed).toLocaleString()}
                 </div>
               </div>
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">U Amount</label>
                 <input 
-                  type="number" value={currentStockUsedAmount === 0 ? "" : currentStockUsedAmount} onChange={(e) => setCurrentStockUsedAmount(e.target.value === "" ? 0 : Number(e.target.value))}
+                  type="number" value={form.currentStockUsedAmount === 0 ? "" : form.currentStockUsedAmount} onChange={(e) => setField("currentStockUsedAmount", e.target.value === "" ? 0 : Number(e.target.value))}
                   className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
                 />
               </div>
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Bal Amount</label>
                 <input 
-                  type="number" value={currentStockBalanceAmount === 0 ? "" : currentStockBalanceAmount} onChange={(e) => setCurrentStockBalanceAmount(e.target.value === "" ? 0 : Number(e.target.value))}
+                  type="number" value={form.currentStockBalanceAmount === 0 ? "" : form.currentStockBalanceAmount} onChange={(e) => setField("currentStockBalanceAmount", e.target.value === "" ? 0 : Number(e.target.value))}
                   className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
                 />
               </div>
@@ -409,7 +484,7 @@ export function CementLoadView({
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Party Name</label>
                 <input 
-                  type="text" value={paymentPartyName} onChange={(e) => setPaymentPartyName(e.target.value)}
+                  type="text" value={form.paymentPartyName} onChange={(e) => setField("paymentPartyName", e.target.value)}
                   className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                   placeholder="Party Name"
                 />
@@ -417,34 +492,34 @@ export function CementLoadView({
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Bill Amount</label>
                 <input 
-                  type="number" value={paymentBillAmount === 0 ? "" : paymentBillAmount} onChange={(e) => setPaymentBillAmount(e.target.value === "" ? 0 : Number(e.target.value))}
+                  type="number" value={form.paymentBillAmount === 0 ? "" : form.paymentBillAmount} onChange={(e) => setField("paymentBillAmount", e.target.value === "" ? 0 : Number(e.target.value))}
                   className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
                 />
               </div>
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Bill Date</label>
                 <input 
-                  type="date" value={paymentBillDate} onChange={(e) => setPaymentBillDate(e.target.value)}
+                  type="date" value={form.paymentBillDate} onChange={(e) => setField("paymentBillDate", e.target.value)}
                   className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 />
               </div>
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Paid Amount</label>
                 <input 
-                  type="number" value={paymentPaidAmount === 0 ? "" : paymentPaidAmount} onChange={(e) => setPaymentPaidAmount(e.target.value === "" ? 0 : Number(e.target.value))}
+                  type="number" value={form.paymentPaidAmount === 0 ? "" : form.paymentPaidAmount} onChange={(e) => setField("paymentPaidAmount", e.target.value === "" ? 0 : Number(e.target.value))}
                   className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
                 />
               </div>
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Balance Amount</label>
                 <div className="w-full px-3 py-2 bg-neutral-50 border border-neutral-300 rounded text-xs font-mono font-bold text-black">
-                  ₹{(paymentBillAmount - paymentPaidAmount).toLocaleString()}
+                  ₹{(form.paymentBillAmount - form.paymentPaidAmount).toLocaleString()}
                 </div>
               </div>
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Remarks</label>
                 <input 
-                  type="text" value={paymentRemarks} onChange={(e) => setPaymentRemarks(e.target.value)}
+                  type="text" value={form.paymentRemarks} onChange={(e) => setField("paymentRemarks", e.target.value)}
                   className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                   placeholder="Payment remarks"
                 />
@@ -456,29 +531,19 @@ export function CementLoadView({
           <div className="flex gap-2 justify-end border-t border-neutral-200 pt-3">
             {editingId && (
               <button 
-                type="button" onClick={() => handleEdit(cementLoads.find(c => c.id === editingId)!)}
+                type="button" onClick={() => { const item = displayedCementLoads.find(c => c.id === editingId); if (item) handleEdit(item); }}
                 className="px-3 py-1.5 border border-neutral-300 hover:bg-neutral-100 text-xs font-semibold rounded text-black bg-white cursor-pointer"
               >
                 Edit
               </button>
             )}
-            {!editingId ? (
-              <button 
-                type="submit"
-                disabled={isSaving}
-                className="px-3 py-1.5 bg-black text-white hover:bg-neutral-850 text-xs font-semibold rounded cursor-pointer disabled:opacity-50"
-              >
-                {isSaving ? "Saving..." : "Save"}
-              </button>
-            ) : (
-              <button 
-                type="submit"
-                disabled={isSaving}
-                className="px-3 py-1.5 bg-black text-white hover:bg-neutral-850 text-xs font-semibold rounded cursor-pointer disabled:opacity-50"
-              >
-                {isSaving ? "Saving..." : "Update"}
-              </button>
-            )}
+            <button 
+              type="submit"
+              disabled={isSaving}
+              className="px-3 py-1.5 bg-black text-white hover:bg-neutral-800 text-xs font-semibold rounded cursor-pointer disabled:opacity-50"
+            >
+              {isSaving ? "Saving..." : editingId ? "Update" : "Save"}
+            </button>
             <button 
               type="button" onClick={clearForm}
               className="px-3 py-1.5 border border-neutral-300 hover:bg-neutral-100 text-xs font-semibold rounded text-black bg-white cursor-pointer"
@@ -490,12 +555,6 @@ export function CementLoadView({
               className="px-3 py-1.5 border border-neutral-300 hover:bg-neutral-100 text-xs font-semibold rounded text-black bg-white cursor-pointer"
             >
               Cancel
-            </button>
-            <button 
-              type="button" onClick={() => { setShowForm(false); setEditingId(null); }}
-              className="px-3 py-1.5 border border-neutral-300 hover:bg-neutral-100 text-xs font-semibold rounded text-black bg-white cursor-pointer"
-            >
-              Back
             </button>
           </div>
         </form>
@@ -530,8 +589,8 @@ export function CementLoadView({
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-100">
-              {filteredLoads.map(load => (
-                <tr key={load.id} className="hover:bg-neutral-55">
+              {displayedCementLoads.map(load => (
+                <tr key={load.id} className="hover:bg-neutral-50">
                   <td className="p-3 font-mono text-black">{formatDate(load.purchaseDate)}</td>
                   <td className="p-3 font-bold text-black">{load.purchasedFrom}</td>
                   <td className="p-3 text-black">{load.cementCompany}</td>
@@ -539,7 +598,7 @@ export function CementLoadView({
                   <td className="p-3 text-right font-mono text-black">{load.loadInBags}</td>
                   <td className="p-3 text-right font-mono text-black">₹{load.amountPerLoad.toLocaleString()}</td>
                   <td className="p-3 text-right font-mono text-neutral-600">₹{load.paidAmount.toLocaleString()}</td>
-                  <td className="p-3 text-right font-mono font-bold text-black">₹{load.balanceAmount.toLocaleString()}</td>
+                  <td className="p-3 text-right font-mono font-bold text-black">₹{(load.balanceAmount ?? (load.amountPerLoad - load.paidAmount)).toLocaleString()}</td>
                   <td className="p-3 text-right">
                     <div className="flex gap-2 justify-end">
                       <button onClick={() => handleEdit(load)} className="px-2 py-1 border border-neutral-300 rounded text-[10px] font-bold text-black hover:bg-neutral-100 cursor-pointer">
@@ -552,7 +611,7 @@ export function CementLoadView({
                   </td>
                 </tr>
               ))}
-              {filteredLoads.length === 0 && (
+              {displayedCementLoads.length === 0 && (
                 <tr>
                   <td colSpan={9} className="p-6 text-center text-neutral-400">No cement load records found.</td>
                 </tr>
