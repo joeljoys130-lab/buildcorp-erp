@@ -52,24 +52,21 @@ export class OtpService {
     userAgent?: string;
   }): Promise<{ success: boolean; error?: string; retryAfter?: number }> {
     const { userId, email, ip, userAgent } = params;
-    const destination = email;
+    const destination = email.toLowerCase().trim();
     const channel = 'email';
     const now = new Date();
 
     try {
-      // 1. Rate Limiting & Reuse Check: If an unexpired active OTP exists, check cooldown
+      // 1. Rate Limiting Check: Ensure user cannot spam OTP requests within OTP_RESEND_SECONDS (e.g. 30s)
       const latestOtp = await withTimeout(
         prisma.otp.findFirst({
           where: { userId, channel },
           orderBy: { createdAt: 'desc' },
         }),
-        1000
-      );
+        2500
+      ).catch(() => null);
 
       if (latestOtp) {
-        if (!latestOtp.isUsed && latestOtp.expiresAt > now) {
-          return { success: true };
-        }
         const elapsedSeconds = Math.floor((now.getTime() - latestOtp.createdAt.getTime()) / 1000);
         if (elapsedSeconds < OTP_RESEND_SECONDS) {
           return {
@@ -80,27 +77,29 @@ export class OtpService {
         }
       }
 
-      // 2. Generate new random 6-digit OTP
+      // 2. Generate fresh random 6-digit OTP
       const otpCode = this.generateOtpString(email);
       const otpHash = await bcrypt.hash(otpCode, 12);
       const expiresAt = new Date(now.getTime() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
-      // Store in memory fallback as well
+      // Store in memory fallback
       MEM_OTP[userId + ':email'] = {
         hash: otpHash,
         expiresAt: expiresAt.getTime(),
         createdAt: now.getTime(),
       };
 
-      // 3. Store in DB asynchronously with timeout
-      void withTimeout(
-        prisma.otp.updateMany({
-          where: { userId, channel, isUsed: false },
-          data: { isUsed: true },
-        }),
-        1000
-      ).then(() => {
-        return withTimeout(
+      // 3. Store in DB synchronously so serverless instances persist the record before response completes
+      try {
+        await withTimeout(
+          prisma.otp.updateMany({
+            where: { userId, channel, isUsed: false },
+            data: { isUsed: true },
+          }),
+          2500
+        );
+
+        await withTimeout(
           prisma.otp.create({
             data: {
               userId,
@@ -112,35 +111,25 @@ export class OtpService {
               isUsed: false,
             },
           }),
-          1000
+          2500
         );
-      }).catch(() => {});
+      } catch (dbWriteErr) {
+        console.warn('⚠️  DB write in requestOtp failed or timed out:', (dbWriteErr as Error).message?.slice(0, 120));
+      }
 
       // 4. Audit & structured logs
-      logger.info(`Email OTP generated for User ID: ${userId} | IP: ${ip || 'unknown'} | Agent: ${userAgent || 'unknown'}`);
+      logger.info(`Email OTP generated for User ID: ${userId} (${destination}) | IP: ${ip || 'unknown'}`);
 
-      // 5. Dispatch OTP via Email asynchronously so UI transitions instantly
+      // 5. Dispatch OTP via Email asynchronously (or catch error)
       void sendOtpEmail(destination, otpCode).catch((emailErr) => {
-        logger.error(`Email dispatch failed to ${email}: ${(emailErr as Error).message}`);
+        logger.error(`Email dispatch failed to ${destination}: ${(emailErr as Error).message}`);
       });
 
       return { success: true };
 
-    } catch (dbErr) {
-      console.warn('⚠️  DB timeout/unavailable in requestOtp, using memory fallback:', (dbErr as Error).message?.slice(0, 120));
-      const otpCode = this.generateOtpString(email);
-      const otpHash = await bcrypt.hash(otpCode, 12);
-      MEM_OTP[userId + ':email'] = {
-        hash: otpHash,
-        expiresAt: Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000,
-        createdAt: Date.now(),
-      };
-
-      void sendOtpEmail(destination, otpCode).catch((emailErr) => {
-        logger.error(`Email dispatch failed to ${email}: ${(emailErr as Error).message}`);
-      });
-
-      return { success: true };
+    } catch (err) {
+      console.error('❌ requestOtp error:', (err as Error).message);
+      return { success: false, error: 'Failed to generate OTP. Please try again.' };
     }
   }
 
