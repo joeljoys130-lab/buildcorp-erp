@@ -1,24 +1,26 @@
 import nodemailer from 'nodemailer';
 import { logInfo, logError } from '../logger';
 
-const FROM_NAME = process.env.SMTP_FROM_NAME || 'BuildCorp ERP';
+const FROM_NAME = process.env.SMTP_FROM || process.env.SMTP_FROM_NAME || 'BuildCorp ERP';
 
 /**
- * Create a Nodemailer transport using Gmail SMTP with explicit settings.
- * Reading env vars at call-time (not module-load time) ensures .env is loaded.
+ * Create a Nodemailer transport using SMTP settings.
+ * Reading env vars at call-time ensures production serverless environment variables are loaded.
  */
 function createTransport() {
-  const user = process.env.SMTP_USERNAME?.trim();
-  const pass = process.env.SMTP_PASSWORD?.trim();
+  const user = (process.env.SMTP_USER || process.env.SMTP_USERNAME)?.trim();
+  const pass = (process.env.SMTP_PASS || process.env.SMTP_PASSWORD)?.trim();
+  const host = process.env.SMTP_HOST?.trim() || 'smtp.gmail.com';
+  const port = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : 465;
 
   if (!user || !pass) {
-    throw new Error('SMTP credentials not configured. Set SMTP_USERNAME and SMTP_PASSWORD in .env');
+    throw new Error('SMTP credentials not configured. Set SMTP_USER (or SMTP_USERNAME) and SMTP_PASSWORD in environment variables.');
   }
 
   return nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 465,
-    secure: true, // SSL
+    host,
+    port,
+    secure: port === 465, // SSL for 465, STARTTLS for 587
     auth: { user, pass },
     connectionTimeout: 10000,  // 10 seconds
     greetingTimeout: 10000,
@@ -33,7 +35,7 @@ function createTransport() {
  */
 export async function sendOtpEmail(to: string, otp: string): Promise<void> {
   const transporter = createTransport();
-  const smtpUser = process.env.SMTP_USERNAME?.trim() || '';
+  const smtpUser = (process.env.SMTP_USER || process.env.SMTP_USERNAME)?.trim() || '';
 
   const mailOptions = {
     from: `"${FROM_NAME}" <${smtpUser}>`,
