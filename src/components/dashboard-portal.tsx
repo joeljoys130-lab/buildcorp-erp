@@ -28,7 +28,7 @@ import {
   OfficeWiseWorkView, WorkStatusUpdationView, ExpenseUpdationView,
   ProfitCalculationView
 } from "./views/modules";
-import type { CementLoad } from "@/lib/types";
+import type { CementLoad, Entry, StockRegisterItem, SiteMaterial, PrivateWork, TarLoad, WorkBasedEntry, Expense } from "@/lib/types";
 
 interface DashboardPortalProps {
   initialUser: any;
@@ -76,14 +76,161 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
     }
   };
 
-  // Targeted refresh — only re-fetches cement loads (fast, ~1 query)
+  // Targeted refreshes — individual fast queries instead of heavy getDashboardDataAction
   const refreshCementLoads = async () => {
     try {
       const data = await getCementLoadsAction();
-      setCementLoads(data || []);
+      if (data) setCementLoads(data);
     } catch (e) {
       console.error("Failed to refresh cement loads", e);
     }
+  };
+
+  const refreshEntries = async () => {
+    try {
+      const data = await getEntriesAction();
+      if (data) setEntries(data);
+    } catch (e) {
+      console.error("Failed to refresh entries", e);
+    }
+  };
+
+  const refreshStockRegister = async () => {
+    try {
+      const data = await getStockRegisterAction();
+      if (data) setStockRegister(data);
+    } catch (e) {
+      console.error("Failed to refresh stock register", e);
+    }
+  };
+
+  const refreshSiteMaterials = async () => {
+    try {
+      const data = await getSiteMaterialsAction();
+      if (data) setSiteMaterials(data);
+    } catch (e) {
+      console.error("Failed to refresh site materials", e);
+    }
+  };
+
+  const refreshPrivateWorks = async () => {
+    try {
+      const data = await getPrivateWorksAction();
+      if (data) setPrivateWorks(data);
+    } catch (e) {
+      console.error("Failed to refresh private works", e);
+    }
+  };
+
+  const refreshTarLoads = async () => {
+    try {
+      const data = await getTarLoadsAction();
+      if (data) setTarLoads(data);
+    } catch (e) {
+      console.error("Failed to refresh tar loads", e);
+    }
+  };
+
+  const refreshWorkBasedEntries = async () => {
+    try {
+      const data = await getWorkBasedEntriesAction();
+      if (data) setWorkBasedEntries(data);
+    } catch (e) {
+      console.error("Failed to refresh work based entries", e);
+    }
+  };
+
+  const refreshExpenses = async () => {
+    try {
+      const data = await getExpensesAction();
+      if (data) setExpenses(data);
+    } catch (e) {
+      console.error("Failed to refresh expenses", e);
+    }
+  };
+
+  // Optimistic Handlers
+  const optimisticUpdateCementLoad = (updated: any) => {
+    setCementLoads((prev: CementLoad[]) => {
+      const idx = prev.findIndex((c: CementLoad) => c.id === updated.id);
+      if (idx === -1) return [updated, ...prev];
+      return prev.map((c: CementLoad) => (c.id === updated.id ? { ...c, ...updated } : c));
+    });
+  };
+  const optimisticDeleteCementLoad = (id: string) => {
+    setCementLoads((prev: CementLoad[]) => prev.filter((c: CementLoad) => c.id !== id));
+  };
+
+  const optimisticUpdateEntry = (updated: any) => {
+    setEntries((prev: Entry[]) => {
+      const idx = prev.findIndex((e: Entry) => e.id === updated.id);
+      if (idx === -1) return [updated, ...prev];
+      return prev.map((e: Entry) => (e.id === updated.id ? { ...e, ...updated } : e));
+    });
+  };
+  const optimisticDeleteEntry = (id: string) => {
+    setEntries((prev: Entry[]) => prev.filter((e: Entry) => e.id !== id));
+  };
+
+  const optimisticUpdateStockItem = (updated: any) => {
+    setStockRegister((prev: StockRegisterItem[]) =>
+      prev.map((s: StockRegisterItem) => (s.id === updated.id ? { ...s, ...updated } : s))
+    );
+  };
+
+  const optimisticUpdateSiteMaterial = (updated: any) => {
+    setSiteMaterials((prev: SiteMaterial[]) => {
+      const idx = prev.findIndex((m: SiteMaterial) => m.id === updated.id);
+      if (idx === -1) return [updated, ...prev];
+      return prev.map((m: SiteMaterial) => (m.id === updated.id ? { ...m, ...updated } : m));
+    });
+  };
+  const optimisticDeleteSiteMaterial = (id: string) => {
+    setSiteMaterials((prev: SiteMaterial[]) => prev.filter((m: SiteMaterial) => m.id !== id));
+  };
+
+  const optimisticUpdatePrivateWork = (updated: any) => {
+    setPrivateWorks((prev: PrivateWork[]) => {
+      const idx = prev.findIndex((pw: PrivateWork) => pw.id === updated.id);
+      if (idx === -1) return [updated, ...prev];
+      return prev.map((pw: PrivateWork) => (pw.id === updated.id ? { ...pw, ...updated } : pw));
+    });
+  };
+  const optimisticDeletePrivateWork = (id: string) => {
+    setPrivateWorks((prev: PrivateWork[]) => prev.filter((pw: PrivateWork) => pw.id !== id));
+  };
+
+  const optimisticUpdateTarLoad = (updated: any) => {
+    setTarLoads((prev: TarLoad[]) => {
+      const idx = prev.findIndex((t: TarLoad) => t.id === updated.id);
+      if (idx === -1) return [updated, ...prev];
+      return prev.map((t: TarLoad) => (t.id === updated.id ? { ...t, ...updated } : t));
+    });
+  };
+  const optimisticDeleteTarLoad = (id: string) => {
+    setTarLoads((prev: TarLoad[]) => prev.filter((t: TarLoad) => t.id !== id));
+  };
+
+  const optimisticUpdateWorkBasedEntry = (updated: any) => {
+    setWorkBasedEntries((prev: WorkBasedEntry[]) => {
+      const idx = prev.findIndex((w: WorkBasedEntry) => w.id === updated.id);
+      if (idx === -1) return [updated, ...prev];
+      return prev.map((w: WorkBasedEntry) => (w.id === updated.id ? { ...w, ...updated } : w));
+    });
+  };
+  const optimisticDeleteWorkBasedEntry = (id: string) => {
+    setWorkBasedEntries((prev: WorkBasedEntry[]) => prev.filter((w: WorkBasedEntry) => w.id !== id));
+  };
+
+  const optimisticUpdateExpense = (updated: any) => {
+    setExpenses((prev: Expense[]) => {
+      const idx = prev.findIndex((ex: Expense) => ex.id === updated.id);
+      if (idx === -1) return [updated, ...prev];
+      return prev.map((ex: Expense) => (ex.id === updated.id ? { ...ex, ...updated } : ex));
+    });
+  };
+  const optimisticDeleteExpense = (id: string) => {
+    setExpenses((prev: Expense[]) => prev.filter((ex: Expense) => ex.id !== id));
   };
 
   const navigationItems = [
@@ -214,17 +361,8 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
               onCreateCementLoad={createCementLoadAction}
               onUpdateCementLoad={updateCementLoadAction}
               onDeleteCementLoad={deleteCementLoadAction}
-              onOptimisticUpdate={(updated) =>
-                setCementLoads((prev) => {
-                  const idx = prev.findIndex((c) => c.id === updated.id);
-                  if (idx === -1) {
-                    // New record (create path): prepend to parent state
-                    return [updated, ...prev];
-                  }
-                  // Existing record (edit path): update in-place
-                  return prev.map((c) => c.id === updated.id ? { ...c, ...updated } : c);
-                })
-              }
+              onOptimisticUpdate={optimisticUpdateCementLoad}
+              onOptimisticDelete={optimisticDeleteCementLoad}
               onNavigate={setActiveTab}
             />
           )}
@@ -232,10 +370,12 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
           {activeTab === "entry" && (
             <EntryView 
               entries={entries} 
-              onRefresh={refreshAllStates}
+              onRefresh={refreshEntries}
               onCreateEntry={createEntryAction}
               onUpdateEntry={updateEntryAction}
               onDeleteEntry={deleteEntryAction}
+              onOptimisticUpdate={optimisticUpdateEntry}
+              onOptimisticDelete={optimisticDeleteEntry}
               onNavigate={setActiveTab}
             />
           )}
@@ -243,8 +383,9 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
           {activeTab === "stock-register" && (
             <StockRegisterView 
               stockItems={stockRegister}
-              onRefresh={refreshAllStates}
+              onRefresh={refreshStockRegister}
               onUpdateStockItem={updateStockRegisterItemAction}
+              onOptimisticUpdate={optimisticUpdateStockItem}
               onNavigate={setActiveTab}
             />
           )}
@@ -254,10 +395,12 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
               entries={entries}
               privateWorks={privateWorks}
               siteMaterials={siteMaterials} 
-              onRefresh={refreshAllStates}
+              onRefresh={refreshSiteMaterials}
               onCreateSiteMaterial={createSiteMaterialAction}
               onUpdateSiteMaterial={updateSiteMaterialAction}
               onDeleteSiteMaterial={deleteSiteMaterialAction}
+              onOptimisticUpdate={optimisticUpdateSiteMaterial}
+              onOptimisticDelete={optimisticDeleteSiteMaterial}
               onNavigate={setActiveTab}
             />
           )}
@@ -265,10 +408,12 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
           {activeTab === "private-work" && (
             <PrivateWorkView 
               privateWorks={privateWorks} 
-              onRefresh={refreshAllStates}
+              onRefresh={refreshPrivateWorks}
               onCreatePrivateWork={createPrivateWorkAction}
               onUpdatePrivateWork={updatePrivateWorkAction}
               onDeletePrivateWork={deletePrivateWorkAction}
+              onOptimisticUpdate={optimisticUpdatePrivateWork}
+              onOptimisticDelete={optimisticDeletePrivateWork}
               onNavigate={setActiveTab}
             />
           )}
@@ -276,10 +421,12 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
           {activeTab === "tar-load" && (
             <TarLoadView 
               tarLoads={tarLoads} 
-              onRefresh={refreshAllStates}
+              onRefresh={refreshTarLoads}
               onCreateTarLoad={createTarLoadAction}
               onUpdateTarLoad={updateTarLoadAction}
               onDeleteTarLoad={deleteTarLoadAction}
+              onOptimisticUpdate={optimisticUpdateTarLoad}
+              onOptimisticDelete={optimisticDeleteTarLoad}
               onNavigate={setActiveTab}
             />
           )}
@@ -289,10 +436,12 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
               entries={entries} 
               privateWorks={privateWorks}
               workBasedEntries={workBasedEntries} 
-              onRefresh={refreshAllStates}
+              onRefresh={refreshWorkBasedEntries}
               onCreateWorkBasedEntry={createWorkBasedEntryAction}
               onUpdateWorkBasedEntry={updateWorkBasedEntryAction}
               onDeleteWorkBasedEntry={deleteWorkBasedEntryAction}
+              onOptimisticUpdate={optimisticUpdateWorkBasedEntry}
+              onOptimisticDelete={optimisticDeleteWorkBasedEntry}
               onNavigate={setActiveTab}
             />
           )}
@@ -315,8 +464,9 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
           {activeTab === "work-status-updation" && (
             <WorkStatusUpdationView 
               entries={entries} 
-              onRefresh={refreshAllStates}
+              onRefresh={refreshEntries}
               onUpdateEntry={updateEntryAction}
+              onOptimisticUpdate={optimisticUpdateEntry}
             />
           )}
 
@@ -325,10 +475,23 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
               entries={entries} 
               privateWorks={privateWorks}
               expenses={expenses}
-              onRefresh={refreshAllStates}
+              onRefresh={refreshExpenses}
               onCreateExpense={createExpenseAction}
               onUpdateExpense={updateExpenseAction}
               onDeleteExpense={deleteExpenseAction}
+              onOptimisticUpdate={optimisticUpdateExpense}
+              onOptimisticDelete={optimisticDeleteExpense}
+              onNavigate={setActiveTab}
+            />
+          )}
+
+          {activeTab === "profit-calculation" && (
+            <ProfitCalculationView 
+              entries={entries} 
+              privateWorks={privateWorks}
+              cementLoads={cementLoads}
+              tarLoads={tarLoads}
+              expenses={expenses}
               onNavigate={setActiveTab}
             />
           )}

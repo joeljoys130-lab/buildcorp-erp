@@ -15,7 +15,7 @@ generator client {
 model Otp {
   id          String   @id @default(cuid()) @map("_id")
   userId      String
-  channel     String   // "email" | "phone"
+  channel     String   // "email"
   destination String
   otpHash     String
   expiresAt   DateTime
@@ -27,18 +27,15 @@ model Otp {
 }
 
 model User {
-  id                 String   @id @default(cuid()) @map("_id")
-  email              String   @unique
-  name               String
-  role               String   @default("ADMIN")
-  password           String
-  phoneNumber        String?  @unique
-  isPhoneVerified    Boolean  @default(false)
-  preferredOtpMethod String   @default("email")
-  lastOtpMethod      String?
-  organizationId     String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id             String   @id @default(cuid()) @map("_id")
+  email          String   @unique
+  name           String
+  role           String   @default("ADMIN")
+  password       String
+  phoneNumber    String?  @unique
+  organizationId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
 
 // ── MULTI-TENANCY & SESSION MODELS ───────────────────────────────────────────

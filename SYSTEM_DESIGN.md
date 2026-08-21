@@ -108,30 +108,32 @@ erDiagram
 
 ## 3. Data Flow & Security Integration
 
-### 3.1 Authentication Flow (OTP & JWT)
-BuildCorp ERP implements a passwordless, token-based authentication mechanism.
+### 3.1 Authentication Flow (Email OTP & JWT)
+BuildCorp ERP implements a secure 2-step Email OTP authentication mechanism. There are zero mobile OTP or method-selection intermediate screens.
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor User as Client Browser
-    participant API as Next.js API Auth
+    participant API as Next.js Auth API
     participant DB as MongoDB (Prisma)
-    participant Mail as SMTP Service
+    participant Mail as Email Dispatcher
 
-    User->>API: Request Login (Email)
-    API->>DB: Save Generated OtpCode & expiration
-    API->>Mail: Send Email with OTP Code
-    Mail-->>User: Delivers OTP Code
-    User->>API: Verify Login (Email + OTP Code)
-    API->>DB: Validate OTP (Exists, Match, Active)
-    API->>User: Issue HttpOnly Secure JWT Cookie
+    User->>API: 1. Submit Email + Password (POST /api/auth/login)
+    API->>DB: 2. Validate Credentials & Generate Hashed OTP
+    API-->>Mail: 3. Async Email OTP Dispatch
+    API-->>User: 4. Return Lightweight Challenge (Immediate UI Transition)
+    User->>API: 5. Submit 6-Digit OTP (POST /api/verify-otp)
+    API->>DB: 6. Verify Hash & Invalidate OTP
+    API->>User: 7. Set HttpOnly Secure JWT Session Cookie
+    User->>User: 8. Client Redirect to /dashboard
 ```
 
 ### 3.2 Security Matrix
 * **Access Control:** All API endpoints and page routes check for the presence of a valid JWT token via Next.js Middleware. If invalid, the request is redirected to `/login`.
+* **OTP Security:** 6-digit random code, bcrypt hashing before storage, 5-minute expiration, max 5 failed attempts lockout, 30s resend cooldown, and rate limiting per IP/account.
 * **Input Sanitization:** Every API route verifies its payload against a strict Zod schema before database insertion, mitigating injection and malformed-payload vulnerabilities.
-* **Rate Limiting:** Sensitive endpoints (e.g., OTP request and verify endpoints) are guarded with middleware to limit operations to a maximum of requests per IP/account per minute.
+* **Rate Limiting:** Sensitive endpoints (e.g., login, OTP request and verify endpoints) are guarded with rate limiters per IP/user per minute.
 
 ---
 

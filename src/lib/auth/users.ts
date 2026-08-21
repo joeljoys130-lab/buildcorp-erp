@@ -14,19 +14,17 @@ export interface RegisteredUser {
   role: string;
   password: string;
   phoneNumber?: string | null;
-  isPhoneVerified?: boolean;
-  preferredOtpMethod?: string;
-  lastOtpMethod?: string | null;
 }
 
 /** Hardcoded fallback seed users */
-export const REGISTERED_USERS: Record<string, Omit<RegisteredUser, 'phoneNumber' | 'isPhoneVerified' | 'preferredOtpMethod' | 'lastOtpMethod'>> = {
+export const REGISTERED_USERS: Record<string, RegisteredUser> = {
   'thomasjosephkidarathil@gmail.com': {
     id: 'u-thomas',
     email: 'thomasjosephkidarathil@gmail.com',
     name: 'Thomas Joseph',
     role: 'ADMIN',
     password: 'Thomas@erp',
+    phoneNumber: '+919633864150',
   },
   'test@buildcorp.com': {
     id: 'u-test',
@@ -34,6 +32,7 @@ export const REGISTERED_USERS: Record<string, Omit<RegisteredUser, 'phoneNumber'
     name: 'Test User',
     role: 'ADMIN',
     password: 'Password',
+    phoneNumber: '+918590591987',
   },
 };
 
@@ -43,9 +42,12 @@ export const REGISTERED_USERS: Record<string, Omit<RegisteredUser, 'phoneNumber'
  */
 async function ensureDbUser(email: string): Promise<RegisteredUser | null> {
   const normEmail = email.toLowerCase();
+  const fallback = REGISTERED_USERS[normEmail];
+  if (fallback) {
+    return fallback;
+  }
 
   try {
-    // Try database lookup first
     let user = await prisma.user.findUnique({ where: { email: normEmail } });
 
     // If not found in DB but exists in hardcoded config, seed it
@@ -60,44 +62,21 @@ async function ensureDbUser(email: string): Promise<RegisteredUser | null> {
               name: fallback.name,
               role: fallback.role,
               password: fallback.password,
-              phoneNumber: normEmail === 'test@buildcorp.com' ? '+918590591987' : normEmail === 'thomasjosephkidarathil@gmail.com' ? '+919633864150' : null,
-              isPhoneVerified: normEmail === 'test@buildcorp.com' || normEmail === 'thomasjosephkidarathil@gmail.com',
-              preferredOtpMethod: 'email',
+              phoneNumber: fallback.phoneNumber,
             },
           });
         } catch {
-          // Seeding failed (e.g. duplicate key from a race condition) — try a fresh lookup
           user = await prisma.user.findUnique({ where: { email: normEmail } });
         }
-      }
-    } else {
-      // Force update phone number if it doesn't match the expected value
-      if (normEmail === 'test@buildcorp.com' && user.phoneNumber !== '+918590591987') {
-        user = await prisma.user.update({
-          where: { email: normEmail },
-          data: { phoneNumber: '+918590591987', isPhoneVerified: true },
-        });
-      } else if (normEmail === 'thomasjosephkidarathil@gmail.com' && user.phoneNumber !== '+919633864150') {
-        user = await prisma.user.update({
-          where: { email: normEmail },
-          data: { phoneNumber: '+919633864150', isPhoneVerified: true },
-        });
       }
     }
 
     return user ? (user as unknown as RegisteredUser) : null;
   } catch (dbErr) {
-    // DB unreachable — fall back to hardcoded registry so login still works
     console.warn('⚠️  DB unavailable in ensureDbUser, using hardcoded fallback:', (dbErr as Error).message?.slice(0, 120));
     const fallback = REGISTERED_USERS[normEmail];
     if (!fallback) return null;
-    return {
-      ...fallback,
-      phoneNumber: normEmail === 'test@buildcorp.com' ? '+918590591987' : normEmail === 'thomasjosephkidarathil@gmail.com' ? '+919633864150' : null,
-      isPhoneVerified: normEmail === 'test@buildcorp.com' || normEmail === 'thomasjosephkidarathil@gmail.com',
-      preferredOtpMethod: 'email',
-      lastOtpMethod: null,
-    } as RegisteredUser;
+    return fallback;
   }
 }
 

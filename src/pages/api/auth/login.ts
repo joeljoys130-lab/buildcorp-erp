@@ -1,14 +1,19 @@
 // src/pages/api/auth/login.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
+import bcrypt from 'bcrypt';
 import { findUser } from '@/lib/auth/users';
+import { OtpService } from '@/lib/auth/otp.service';
 
 /**
  * POST /api/auth/login
  * Body: { username: string; password: string }
  *
- * Validates credentials against the registered user registry.
- * On success, returns the user's email so the client can request an OTP.
- * Does NOT issue a JWT here — that happens after OTP verification.
+ * SERVER-SIDE STRICT PASSWORD VALIDATION:
+ * 1. Validates username & password input presence.
+ * 2. Resolves registered user from database/registry.
+ * 3. Verifies submitted password against stored password/hash using bcrypt.
+ * 4. REJECTS request immediately with 401 if password is wrong (NO OTP GENERATED/SENT).
+ * 5. ONLY upon successful password verification, generates & dispatches Email OTP.
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -23,22 +28,46 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   const user = await findUser(username.trim());
-  const isTestUser = user?.email.toLowerCase() === 'test@buildcorp.com';
-  if (!user || (!isTestUser && user.password !== password)) {
+  if (!user) {
     return res.status(401).json({ success: false, error: 'Invalid username or password' });
   }
 
-  // Return user info (no JWT yet — issued only after OTP verification)
+  // Authoritative server-side password check (supports bcrypt hashes & seed credentials)
+  let isPasswordValid = false;
+  if (user.password.startsWith('$2a$') || user.password.startsWith('$2b$')) {
+    isPasswordValid = await bcrypt.compare(password, user.password);
+  } else {
+    isPasswordValid = (user.password === password);
+  }
+
+  if (!isPasswordValid) {
+    return res.status(401).json({ success: false, error: 'Invalid username or password' });
+  }
+
+  const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '';
+  const userAgent = req.headers['user-agent'] || '';
+
+  // ONLY generate & dispatch Email OTP after password validation succeeds
+  const otpRes = await OtpService.requestOtp({
+    userId: user.id,
+    email: user.email,
+    ip,
+    userAgent,
+  });
+
+  if (!otpRes.success) {
+    return res.status(400).json({ success: false, error: otpRes.error || 'Failed to send Email OTP' });
+  }
+
   return res.status(200).json({
     success: true,
+    step: 'otp',
+    email: user.email,
     user: {
-      id:                 user.id,
-      email:              user.email,
-      name:               user.name,
-      role:               user.role,
-      phoneNumber:        user.phoneNumber,
-      isPhoneVerified:    user.isPhoneVerified,
-      preferredOtpMethod: user.preferredOtpMethod,
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
     },
   });
 }

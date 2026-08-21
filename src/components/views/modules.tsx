@@ -1,14 +1,15 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { 
   Plus, Search, FileDown, Edit2, Trash2, Calendar, FileText, CheckCircle, 
-  AlertCircle, X, ChevronRight, Filter, Printer
+  AlertCircle, X, ChevronRight, ChevronDown, ChevronUp, Filter, Printer
 } from "lucide-react";
 import { 
   CementLoad, Entry, StockRegisterItem, SiteMaterial, 
   PrivateWork, TarLoad, WorkBasedEntry, Expense 
 } from "@/lib/types";
+import { useToast } from "@/components/ui/toast";
 
 // Common helper for CSV exports
 const exportCSV = (data: any[], filename: string) => {
@@ -77,6 +78,7 @@ export function CementLoadView({
   onUpdateCementLoad,
   onDeleteCementLoad,
   onOptimisticUpdate,
+  onOptimisticDelete,
   onNavigate
 }: {
   cementLoads: CementLoad[];
@@ -85,24 +87,22 @@ export function CementLoadView({
   onUpdateCementLoad: (id: string, data: any) => Promise<any>;
   onDeleteCementLoad: (id: string) => Promise<any>;
   onOptimisticUpdate?: (updatedItem: CementLoad) => void;
+  onOptimisticDelete?: (id: string) => void;
   onNavigate: (tab: string) => void;
 }) {
+  const toast = useToast();
+  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  // Single form state object — ONE setState replaces 22 individual setters.
+  const [expandedCementLoadId, setExpandedCementLoadId] = useState<string | null>(null);
+
+  // Single form state object
   const [form, setForm] = useState<CementFormState>(CEMENT_FORM_EMPTY);
   const setField = <K extends keyof CementFormState>(key: K, value: CementFormState[K]) =>
     setForm(prev => ({ ...prev, [key]: value }));
 
-  // Holds items that are pending server confirmation (e.g., newly added loads).
-  // These use temp IDs (e.g. "temp-abc123") that are replaced by the real DB
-  // ID when the server responds. We do NOT use a useEffect to clean these up
-  // based on cementLoads — that approach fails because temp IDs never match
-  // real MongoDB IDs.  Cleanup is handled explicitly inside handleSave.
   const [pendingCementLoads, setPendingCementLoads] = useState<CementLoad[]>([]);
-
-  // Search/Filter
   const [searchQuery, setSearchQuery] = useState("");
 
   const displayedCementLoads = useMemo(() => {
@@ -115,13 +115,28 @@ export function CementLoadView({
     );
   }, [pendingCementLoads, cementLoads, searchQuery]);
 
-  // ONE setState call — clears the form instantly.
   const clearForm = () => setForm(CEMENT_FORM_EMPTY);
 
   const handleSave = (e: React.FormEvent) => {
-    const t0 = performance.now();
     e.preventDefault();
     if (isSaving) return;
+
+    // Date Rule Validation: Future dates strictly blocked
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+    if (form.purchaseDate && new Date(form.purchaseDate) > endOfToday) {
+      toast.error("Future dates not allowed", "Purchase date cannot be in the future.");
+      return;
+    }
+    if (form.currentStockDate && new Date(form.currentStockDate) > endOfToday) {
+      toast.error("Future dates not allowed", "Current stock date cannot be in the future.");
+      return;
+    }
+    if (form.paymentBillDate && new Date(form.paymentBillDate) > endOfToday) {
+      toast.error("Future dates not allowed", "Payment bill date cannot be in the future.");
+      return;
+    }
+
     setIsSaving(true);
 
     const payload = {
@@ -149,24 +164,16 @@ export function CementLoadView({
       paymentRemarks: form.paymentRemarks,
     };
 
-    // ── OPTIMISTIC UPDATE (synchronous, before any await) ──────────────────
-    // For CREATE: add a temporary row immediately.
-    // For UPDATE: update the existing row immediately via onOptimisticUpdate.
-    // Neither path waits for the network.
     let optimisticId: string | null = null;
 
     if (!editingId) {
       optimisticId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      // Cast through unknown: payload.purchaseDate is a string (from the form)
-      // but CementLoad.purchaseDate is Date. The table only reads it via formatDate()
-      // which handles strings, so this is safe for the optimistic display.
       const optimisticLoad = {
         ...payload,
         id: optimisticId,
-        // Derive fields that the server computes but the table needs immediately.
         balanceAmount: Number(payload.amountPerLoad) - Number(payload.paidAmount),
         createdAt: new Date(),
-        ownerEmail: "",   // not used in the table display
+        ownerEmail: "",
         workId: null,
       } as unknown as CementLoad;
       setPendingCementLoads(prev => [optimisticLoad, ...prev]);
@@ -177,65 +184,55 @@ export function CementLoadView({
     const editId = editingId;
     const capturedOptimisticId = optimisticId;
 
-    // Close the form and reset UI state immediately — all in one synchronous batch.
     clearForm();
     setEditingId(null);
     setShowForm(false);
     setIsSaving(false);
 
-    console.log(`[PERF] UI closed in ${(performance.now() - t0).toFixed(1)}ms`);
-
-    // ── BACKGROUND SERVER REQUEST ──────────────────────────────────────────
-    // void (no await) — the browser has already painted the optimistic row.
-    // We do NOT call onRefresh() on success; the server returns the saved
-    // record directly which we use to reconcile the temp row.
+    // Background Server Request & Seamless Reconciliation
     void (async () => {
-      const t5 = performance.now();
       try {
         if (editId) {
-          // UPDATE path: server returns the saved record; replace the
-          // optimistically-updated row in the parent with the real data.
           const saved = await onUpdateCementLoad(editId, payload);
-          console.log(`[PERF] Server update: ${(performance.now() - t5).toFixed(0)}ms`);
           if (saved) {
             onOptimisticUpdate?.(saved as unknown as CementLoad);
+            toast.success("Cement Load updated successfully.");
+          } else {
+            toast.error("Failed to update Cement Load.");
           }
         } else {
-          // CREATE path: server returns the new record with the real DB ID.
           const saved = await onCreateCementLoad(payload);
-          console.log(`[PERF] Server create: ${(performance.now() - t5).toFixed(0)}ms`);
-          if (saved && capturedOptimisticId) {
-            // Inject the real record into the parent's cementLoads array.
-            // onOptimisticUpdate now handles inserts (ID not found → prepend).
+          if (saved && saved.id) {
+            // 1. Add authoritative server record to parent state
             onOptimisticUpdate?.(saved as unknown as CementLoad);
-            // Drop the temp row — the real record is now in cementLoads.
-            setPendingCementLoads(prev =>
-              prev.filter(item => item.id !== capturedOptimisticId)
-            );
-          } else if (capturedOptimisticId) {
-            // Server returned nothing useful; fall back to refresh to get real data.
-            setPendingCementLoads(prev =>
-              prev.filter(item => item.id !== capturedOptimisticId)
-            );
-            await onRefresh();
+            // 2. Remove temporary record from local pending array
+            setPendingCementLoads(prev => prev.filter(item => item.id !== capturedOptimisticId));
+            // 3. Transfer expanded state if user expanded the optimistic row
+            if (capturedOptimisticId) {
+              setExpandedCementLoadId(prev => (prev === capturedOptimisticId ? saved.id : prev));
+            }
+            toast.success("Cement Load saved successfully.");
+          } else {
+            if (capturedOptimisticId) {
+              setPendingCementLoads(prev => prev.filter(item => item.id !== capturedOptimisticId));
+              setExpandedCementLoadId(prev => (prev === capturedOptimisticId ? null : prev));
+            }
+            toast.error("Failed to save Cement Load.");
           }
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('Save failed:', err);
-        // Roll back: remove the optimistic row on failure.
         if (capturedOptimisticId) {
-          setPendingCementLoads(prev =>
-            prev.filter(item => item.id !== capturedOptimisticId)
-          );
+          setPendingCementLoads(prev => prev.filter(item => item.id !== capturedOptimisticId));
+          setExpandedCementLoadId(prev => (prev === capturedOptimisticId ? null : prev));
         }
-        alert('Failed to save cement load. Please try again.');
-        // Refresh to ensure displayed data matches the server.
-        await onRefresh();
+        toast.error("Failed to save Cement Load.", err?.message || "Please check database connection.");
       }
     })();
   };
 
-  const handleEdit = (item: CementLoad) => {
+  const handleEdit = (item: CementLoad, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     setForm({
       purchasedFrom: item.purchasedFrom,
       cementCompany: item.cementCompany,
@@ -262,16 +259,31 @@ export function CementLoadView({
     setShowForm(true);
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     if (confirm("Are you sure you want to delete this cement load?")) {
+      const deletedItem = displayedCementLoads.find(c => c.id === id);
       setPendingCementLoads(prev => prev.filter(c => c.id !== id));
-      try {
-        await onDeleteCementLoad(id);
-        onRefresh();
-      } catch (err) {
-        console.error('Delete failed:', err);
-        onRefresh();
+      onOptimisticDelete?.(id);
+      if (expandedCementLoadId === id) {
+        setExpandedCementLoadId(null);
       }
+      void (async () => {
+        try {
+          const ok = await onDeleteCementLoad(id);
+          if (ok !== false) {
+            toast.success("Cement Load deleted successfully.");
+          } else {
+            throw new Error("Server returned false");
+          }
+        } catch (err: any) {
+          console.error('Delete failed:', err);
+          toast.error("Failed to delete Cement Load.", "Restoring record...");
+          if (deletedItem) {
+            onOptimisticUpdate?.(deletedItem);
+          }
+        }
+      })();
     }
   };
 
@@ -365,10 +377,11 @@ export function CementLoadView({
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Purchased Date</label>
               <input 
-                type="date" required value={form.purchaseDate} onChange={(e) => setField("purchaseDate", e.target.value)}
+                type="date" required max={todayStr} value={form.purchaseDate} onChange={(e) => setField("purchaseDate", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
               />
             </div>
+
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Load In Tonne</label>
               <input 
@@ -436,7 +449,7 @@ export function CementLoadView({
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Current Date</label>
                 <input 
-                  type="date" value={form.currentStockDate} onChange={(e) => setField("currentStockDate", e.target.value)}
+                  type="date" max={todayStr} value={form.currentStockDate} onChange={(e) => setField("currentStockDate", e.target.value)}
                   className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 />
               </div>
@@ -499,7 +512,7 @@ export function CementLoadView({
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Bill Date</label>
                 <input 
-                  type="date" value={form.paymentBillDate} onChange={(e) => setField("paymentBillDate", e.target.value)}
+                  type="date" max={todayStr} value={form.paymentBillDate} onChange={(e) => setField("paymentBillDate", e.target.value)}
                   className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 />
               </div>
@@ -589,28 +602,179 @@ export function CementLoadView({
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-100">
-              {displayedCementLoads.map(load => (
-                <tr key={load.id} className="hover:bg-neutral-50">
-                  <td className="p-3 font-mono text-black">{formatDate(load.purchaseDate)}</td>
-                  <td className="p-3 font-bold text-black">{load.purchasedFrom}</td>
-                  <td className="p-3 text-black">{load.cementCompany}</td>
-                  <td className="p-3 text-right font-mono text-black">{load.loadInTonne} T</td>
-                  <td className="p-3 text-right font-mono text-black">{load.loadInBags}</td>
-                  <td className="p-3 text-right font-mono text-black">₹{load.amountPerLoad.toLocaleString()}</td>
-                  <td className="p-3 text-right font-mono text-neutral-600">₹{load.paidAmount.toLocaleString()}</td>
-                  <td className="p-3 text-right font-mono font-bold text-black">₹{(load.balanceAmount ?? (load.amountPerLoad - load.paidAmount)).toLocaleString()}</td>
-                  <td className="p-3 text-right">
-                    <div className="flex gap-2 justify-end">
-                      <button onClick={() => handleEdit(load)} className="px-2 py-1 border border-neutral-300 rounded text-[10px] font-bold text-black hover:bg-neutral-100 cursor-pointer">
-                        Edit
-                      </button>
-                      <button onClick={() => handleDelete(load.id)} className="px-2 py-1 border border-neutral-300 rounded text-[10px] font-bold text-black hover:bg-neutral-100 cursor-pointer">
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {displayedCementLoads.map(load => {
+                const isExpanded = expandedCementLoadId === load.id;
+                return (
+                  <React.Fragment key={load.id}>
+                    <tr 
+                      onClick={() => setExpandedCementLoadId(prev => (prev === load.id ? null : load.id))}
+                      className={`hover:bg-neutral-50 cursor-pointer transition-colors ${isExpanded ? "bg-neutral-50/80 font-medium" : ""}`}
+                    >
+                      <td className="p-3 font-mono text-black">{formatDate(load.purchaseDate)}</td>
+                      <td className="p-3 font-bold text-black">{load.purchasedFrom}</td>
+                      <td className="p-3 text-black">{load.cementCompany}</td>
+                      <td className="p-3 text-right font-mono text-black">{load.loadInTonne} T</td>
+                      <td className="p-3 text-right font-mono text-black">{load.loadInBags}</td>
+                      <td className="p-3 text-right font-mono text-black">₹{load.amountPerLoad.toLocaleString()}</td>
+                      <td className="p-3 text-right font-mono text-neutral-600">₹{load.paidAmount.toLocaleString()}</td>
+                      <td className="p-3 text-right font-mono font-bold text-black">₹{(load.balanceAmount ?? (load.amountPerLoad - load.paidAmount)).toLocaleString()}</td>
+                      <td className="p-3 text-right">
+                        <div className="flex gap-1.5 justify-end items-center" onClick={(e) => e.stopPropagation()}>
+                          <button 
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedCementLoadId(prev => (prev === load.id ? null : load.id));
+                            }} 
+                            className="px-2 py-1 border border-neutral-300 rounded text-[10px] font-bold text-black hover:bg-neutral-100 flex items-center gap-1 cursor-pointer bg-white"
+                            title="View Load Details"
+                          >
+                            <span>{isExpanded ? "Hide Details" : "Load Details"}</span>
+                            {isExpanded ? <ChevronUp className="w-3 h-3 text-neutral-600" /> : <ChevronDown className="w-3 h-3 text-neutral-600" />}
+                          </button>
+                          <button 
+                            type="button"
+                            onClick={(e) => handleEdit(load, e)} 
+                            className="px-2 py-1 border border-neutral-300 rounded text-[10px] font-bold text-black hover:bg-neutral-100 cursor-pointer bg-white"
+                          >
+                            Edit
+                          </button>
+                          <button 
+                            type="button"
+                            onClick={(e) => handleDelete(load.id, e)} 
+                            className="px-2 py-1 border border-neutral-300 rounded text-[10px] font-bold text-black hover:bg-neutral-100 cursor-pointer bg-white"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr className="bg-neutral-50 border-b border-neutral-200">
+                        <td colSpan={9} className="p-4">
+                          <div className="border border-neutral-300 bg-white p-4 rounded-lg space-y-4 shadow-sm text-xs text-black">
+                            <div className="flex items-center justify-between border-b border-neutral-200 pb-2">
+                              <h4 className="font-bold uppercase tracking-wider text-[11px] text-black flex items-center gap-2">
+                                <FileText className="w-4 h-4 text-neutral-600" />
+                                Complete Cement Load Details
+                              </h4>
+                              <span className="font-mono text-[10px] text-neutral-400">Record ID: {load.id}</span>
+                            </div>
+
+                            {/* Responsive Multi-column Grid */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Purchased Date</span>
+                                <span className="font-mono text-black font-semibold">{formatDate(load.purchaseDate)}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Party (Purchased From)</span>
+                                <span className="text-black font-semibold">{load.purchasedFrom || 'N/A'}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Cement Company</span>
+                                <span className="text-black font-semibold">{load.cementCompany || 'N/A'}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Load Weight</span>
+                                <span className="font-mono text-black font-semibold">{load.loadInTonne} Tonnes</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Number of Bags</span>
+                                <span className="font-mono text-black font-semibold">{load.loadInBags} Bags</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Billing Name / Buyer</span>
+                                <span className="text-black font-semibold">{load.buyerName || 'N/A'}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Invoice Number</span>
+                                <span className="font-mono text-black font-semibold">{load.invoiceNumber || 'N/A'}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Amount Per Load</span>
+                                <span className="font-mono text-black font-semibold">₹{load.amountPerLoad.toLocaleString()}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Total Amount</span>
+                                <span className="font-mono text-black font-semibold">₹{load.amountPerLoad.toLocaleString()}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Paid Amount</span>
+                                <span className="font-mono text-neutral-700 font-semibold">₹{load.paidAmount.toLocaleString()}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Balance Amount</span>
+                                <span className="font-mono font-bold text-black">₹{(load.balanceAmount ?? (load.amountPerLoad - load.paidAmount)).toLocaleString()}</span>
+                              </div>
+
+                              {/* Current Stock Details */}
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Current Stock Date</span>
+                                <span className="font-mono text-black">{formatDate(load.currentStockDate)}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Current Stock Qty</span>
+                                <span className="font-mono text-black">{load.currentStockQty ?? 0}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Current Stock Used</span>
+                                <span className="font-mono text-black">{load.currentStockUsed ?? 0}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Current Stock Balance</span>
+                                <span className="font-mono font-semibold text-black">{load.currentStockBalance ?? ((load.currentStockQty ?? 0) - (load.currentStockUsed ?? 0))}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Current Stock Used Amt</span>
+                                <span className="font-mono text-black">₹{(load.currentStockUsedAmount ?? 0).toLocaleString()}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Current Stock Balance Amt</span>
+                                <span className="font-mono text-black">₹{(load.currentStockBalanceAmount ?? 0).toLocaleString()}</span>
+                              </div>
+
+                              {/* Payment Details */}
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Payment Party Name</span>
+                                <span className="text-black">{load.paymentPartyName || 'N/A'}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Payment Bill Date</span>
+                                <span className="font-mono text-black">{formatDate(load.paymentBillDate)}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Payment Bill Amount</span>
+                                <span className="font-mono text-black">₹{(load.paymentBillAmount ?? 0).toLocaleString()}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Payment Paid Amount</span>
+                                <span className="font-mono text-black">₹{(load.paymentPaidAmount ?? 0).toLocaleString()}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Payment Balance Amount</span>
+                                <span className="font-mono font-semibold text-black">₹{(load.paymentBalanceAmount ?? ((load.paymentBillAmount ?? 0) - (load.paymentPaidAmount ?? 0))).toLocaleString()}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Payment Remarks</span>
+                                <span className="text-black">{load.paymentRemarks || 'N/A'}</span>
+                              </div>
+                            </div>
+
+                            {/* MANDATORY COMPLETE REMARKS FIELD */}
+                            <div className="border-t border-neutral-200 pt-3">
+                              <span className="block text-[10px] font-bold uppercase text-neutral-400 mb-1">Remarks</span>
+                              <div className="bg-neutral-50 border border-neutral-200 p-3 rounded text-xs text-black whitespace-pre-wrap overflow-wrap-anywhere leading-relaxed font-mono">
+                                {load.remarks && load.remarks.trim() ? load.remarks : "No remarks"}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
               {displayedCementLoads.length === 0 && (
                 <tr>
                   <td colSpan={9} className="p-6 text-center text-neutral-400">No cement load records found.</td>
@@ -627,12 +791,42 @@ export function CementLoadView({
 // ==========================================
 // MODULE 2 – ENTRY
 // ==========================================
+const ENTRY_FORM_EMPTY = {
+  workName: "",
+  amount: 0,
+  nameOfOffice: "",
+  mlaMpName: "",
+  loaReceived: false,
+  gstApplicable: false,
+  lastDateToExecuteAgreement: "",
+  amountOfStampPaperRequired: 0,
+  securityAmount: 0,
+  performanceGuarantee: 0,
+  dlpPeriodAsPerInLOA: "",
+  agreementNo: "",
+  siteHandoverDate: "",
+  workCompletionDateAsPerAgreement: "",
+  wardMemberName: "",
+  wardMemberPhone: "",
+  overseerName: "",
+  overseerPhone: "",
+  executiveEngineerName: "",
+  executiveEngineerPhone: "",
+  assistantEngineerName: "",
+  assistantEngineerPhone: "",
+  blockEngineerName: "",
+  blockEngineerPhone: "",
+};
+type EntryFormState = typeof ENTRY_FORM_EMPTY;
+
 export function EntryView({
   entries,
   onRefresh,
   onCreateEntry,
   onUpdateEntry,
   onDeleteEntry,
+  onOptimisticUpdate,
+  onOptimisticDelete,
   onNavigate
 }: {
   entries: Entry[];
@@ -640,151 +834,174 @@ export function EntryView({
   onCreateEntry: (data: any) => Promise<any>;
   onUpdateEntry: (id: string, data: any) => Promise<any>;
   onDeleteEntry: (id: string) => Promise<any>;
+  onOptimisticUpdate?: (updated: Entry) => void;
+  onOptimisticDelete?: (id: string) => void;
   onNavigate: (tab: string) => void;
 }) {
+  const toast = useToast();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [selectedEntry, setSelectedEntry] = useState<Entry | null>(null);
+  const [form, setForm] = useState<EntryFormState>(ENTRY_FORM_EMPTY);
+  const setField = <K extends keyof EntryFormState>(key: K, value: EntryFormState[K]) =>
+    setForm(prev => ({ ...prev, [key]: value }));
 
-  // Form states
-  const [workName, setWorkName] = useState("");
-  const [amount, setAmount] = useState(0);
-  const [nameOfOffice, setNameOfOffice] = useState("");
-  const [mlaMpName, setMlaMpName] = useState("");
-  const [loaReceived, setLoaReceived] = useState(false);
-  const [lastDateToExecuteAgreement, setLastDateToExecuteAgreement] = useState("");
-  const [amountOfStampPaperRequired, setAmountOfStampPaperRequired] = useState(0);
-  const [securityAmount, setSecurityAmount] = useState(0);
-  const [performanceGuarantee, setPerformanceGuarantee] = useState(0);
-  const [dlpPeriodAsPerInLOA, setDlpPeriodAsPerInLOA] = useState("");
-  const [agreementNo, setAgreementNo] = useState("");
-  const [siteHandoverDate, setSiteHandoverDate] = useState("");
-  const [workCompletionDateAsPerAgreement, setWorkCompletionDateAsPerAgreement] = useState("");
-  // Contact person state hooks
-  const [wardMemberName, setWardMemberName] = useState("");
-  const [wardMemberPhone, setWardMemberPhone] = useState("");
-  const [overseerName, setOverseerName] = useState("");
-  const [overseerPhone, setOverseerPhone] = useState("");
-  const [executiveEngineerName, setExecutiveEngineerName] = useState("");
-  const [executiveEngineerPhone, setExecutiveEngineerPhone] = useState("");
-  const [assistantEngineerName, setAssistantEngineerName] = useState("");
-  const [assistantEngineerPhone, setAssistantEngineerPhone] = useState("");
-  const [blockEngineerName, setBlockEngineerName] = useState("");
-  const [blockEngineerPhone, setBlockEngineerPhone] = useState("");
-  const [gstApplicable, setGstApplicable] = useState(false);
+  const [pendingEntries, setPendingEntries] = useState<Entry[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
 
-  const clearForm = () => {
-    setWardMemberName("");
-    setWardMemberPhone("");
-    setOverseerName("");
-    setOverseerPhone("");
-    setExecutiveEngineerName("");
-    setExecutiveEngineerPhone("");
-    setAssistantEngineerName("");
-    setAssistantEngineerPhone("");
-    setBlockEngineerName("");
-    setBlockEngineerPhone("");
-    setAmount(0);
-    setNameOfOffice("");
-    setMlaMpName("");
-    setLoaReceived(false);
-    setGstApplicable(false);
-    setLastDateToExecuteAgreement("");
-    setAmountOfStampPaperRequired(0);
-    setSecurityAmount(0);
-    setPerformanceGuarantee(0);
-    setDlpPeriodAsPerInLOA("");
-    setAgreementNo("");
-    setSiteHandoverDate("");
-    setWorkCompletionDateAsPerAgreement("");
-  };
+  const displayedEntries = useMemo(() => {
+    const combined = [...pendingEntries, ...entries];
+    if (!searchQuery) return combined;
+    const q = searchQuery.toLowerCase();
+    return combined.filter(e =>
+      (e.workName?.toLowerCase() || "").includes(q) ||
+      (e.agreementNo?.toLowerCase() || "").includes(q) ||
+      (e.nameOfOffice?.toLowerCase() || "").includes(q)
+    );
+  }, [pendingEntries, entries, searchQuery]);
 
-  const handleSave = async (e: React.FormEvent) => {
+  const clearForm = () => setForm(ENTRY_FORM_EMPTY);
+
+  const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (isSaving) return;
     setIsSaving(true);
-    try {
-      const payload = {
-        workName,
-        amount: Number(amount),
-        nameOfOffice,
-        mlaMpName: mlaMpName || "",
-        loaReceived,
-        gstApplicable,
-        lastDateToExecuteAgreement,
-        amountOfStampPaperRequired: Number(amountOfStampPaperRequired),
-        securityAmount: Number(securityAmount),
-        performanceGuarantee: Number(performanceGuarantee),
-        dlpPeriodAsPerInLOA,
-        agreementNo,
-        siteHandoverDate,
-        workCompletionDateAsPerAgreement,
-        // Contact fields
-        wardMemberName: wardMemberName || "",
-        wardMemberPhone: wardMemberPhone || "",
-        overseerName: overseerName || "",
-        overseerPhone: overseerPhone || "",
-        executiveEngineerName: executiveEngineerName || "",
-        executiveEngineerPhone: executiveEngineerPhone || "",
-        assistantEngineerName: assistantEngineerName || "",
-        assistantEngineerPhone: assistantEngineerPhone || "",
-        blockEngineerName: blockEngineerName || "",
-        blockEngineerPhone: blockEngineerPhone || "",
-        status: 'Not Started',
-        paymentReceived: 0,
-        createdAt: new Date().toISOString()
-      };
-      if (editingId) {
-        await onUpdateEntry(editingId, payload);
-      } else {
-        await onCreateEntry(payload);
-      }
-      clearForm();
-      setEditingId(null);
-      setShowForm(false);
-      onRefresh();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsSaving(false);
+
+    const payload = {
+      workName: form.workName,
+      amount: Number(form.amount),
+      nameOfOffice: form.nameOfOffice,
+      mlaMpName: form.mlaMpName || "",
+      loaReceived: form.loaReceived,
+      gstApplicable: form.gstApplicable,
+      lastDateToExecuteAgreement: form.lastDateToExecuteAgreement,
+      amountOfStampPaperRequired: Number(form.amountOfStampPaperRequired),
+      securityAmount: Number(form.securityAmount),
+      performanceGuarantee: Number(form.performanceGuarantee),
+      dlpPeriodAsPerInLOA: form.dlpPeriodAsPerInLOA,
+      agreementNo: form.agreementNo,
+      siteHandoverDate: form.siteHandoverDate,
+      workCompletionDateAsPerAgreement: form.workCompletionDateAsPerAgreement,
+      wardMemberName: form.wardMemberName || "",
+      wardMemberPhone: form.wardMemberPhone || "",
+      overseerName: form.overseerName || "",
+      overseerPhone: form.overseerPhone || "",
+      executiveEngineerName: form.executiveEngineerName || "",
+      executiveEngineerPhone: form.executiveEngineerPhone || "",
+      assistantEngineerName: form.assistantEngineerName || "",
+      assistantEngineerPhone: form.assistantEngineerPhone || "",
+      blockEngineerName: form.blockEngineerName || "",
+      blockEngineerPhone: form.blockEngineerPhone || "",
+      status: 'Not Started',
+      paymentReceived: 0,
+      createdAt: new Date().toISOString()
+    };
+
+    let optimisticId: string | null = null;
+    if (!editingId) {
+      optimisticId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const optimisticEntry = {
+        ...payload,
+        id: optimisticId,
+        ownerEmail: "",
+      } as unknown as Entry;
+      setPendingEntries(prev => [optimisticEntry, ...prev]);
+    } else {
+      onOptimisticUpdate?.({ ...payload, id: editingId } as unknown as Entry);
     }
+
+    const editId = editingId;
+    const capturedOptimisticId = optimisticId;
+
+    clearForm();
+    setEditingId(null);
+    setShowForm(false);
+    setIsSaving(false);
+
+    void (async () => {
+      try {
+        if (editId) {
+          const saved = await onUpdateEntry(editId, payload);
+          if (saved) {
+            onOptimisticUpdate?.(saved as unknown as Entry);
+            toast.success("Project Entry updated successfully.");
+          } else {
+            toast.error("Failed to update project entry.");
+          }
+        } else {
+          const saved = await onCreateEntry(payload);
+          if (saved && saved.id) {
+            // 1. Add authoritative server record to parent state
+            onOptimisticUpdate?.(saved as unknown as Entry);
+            // 2. Remove temporary record from local pending array
+            setPendingEntries(prev => prev.filter(item => item.id !== capturedOptimisticId));
+            toast.success("Project Entry saved successfully.");
+          } else {
+            if (capturedOptimisticId) {
+              setPendingEntries(prev => prev.filter(item => item.id !== capturedOptimisticId));
+            }
+            toast.error("Failed to save project entry.");
+          }
+        }
+      } catch (err: any) {
+        console.error('Entry save failed:', err);
+        if (capturedOptimisticId) {
+          setPendingEntries(prev => prev.filter(item => item.id !== capturedOptimisticId));
+        }
+        toast.error("Failed to save project entry.", err?.message || "Please check database connection.");
+      }
+    })();
   };
 
   const handleEdit = (entry: Entry) => {
     setEditingId(entry.id);
-    setWorkName(entry.workName);
-    setAmount(entry.amount);
-    setNameOfOffice(entry.nameOfOffice);
-    setMlaMpName(entry.mlaMpName || "");
-    setLoaReceived(entry.loaReceived);
-    setGstApplicable(entry.gstApplicable || false);
-    setLastDateToExecuteAgreement(formatDate(entry.lastDateToExecuteAgreement));
-    setAmountOfStampPaperRequired(entry.amountOfStampPaperRequired);
-    setSecurityAmount(entry.securityAmount);
-    setPerformanceGuarantee(entry.performanceGuarantee);
-    setDlpPeriodAsPerInLOA(entry.dlpPeriodAsPerInLOA);
-    setAgreementNo(entry.agreementNo);
-    setSiteHandoverDate(formatDate(entry.siteHandoverDate));
-    setWorkCompletionDateAsPerAgreement(formatDate(entry.workCompletionDateAsPerAgreement));
-    setWardMemberName(entry.wardMemberName || "");
-    setWardMemberPhone(entry.wardMemberPhone || "");
-    setOverseerName(entry.overseerName || "");
-    setOverseerPhone(entry.overseerPhone || "");
-    setExecutiveEngineerName(entry.executiveEngineerName || "");
-    setExecutiveEngineerPhone(entry.executiveEngineerPhone || "");
-    setAssistantEngineerName(entry.assistantEngineerName || "");
-    setAssistantEngineerPhone(entry.assistantEngineerPhone || "");
-    setBlockEngineerName(entry.blockEngineerName || "");
-    setBlockEngineerPhone(entry.blockEngineerPhone || "");
+    setForm({
+      workName: entry.workName,
+      amount: entry.amount,
+      nameOfOffice: entry.nameOfOffice,
+      mlaMpName: entry.mlaMpName || "",
+      loaReceived: entry.loaReceived,
+      gstApplicable: entry.gstApplicable || false,
+      lastDateToExecuteAgreement: formatDate(entry.lastDateToExecuteAgreement),
+      amountOfStampPaperRequired: entry.amountOfStampPaperRequired,
+      securityAmount: entry.securityAmount,
+      performanceGuarantee: entry.performanceGuarantee,
+      dlpPeriodAsPerInLOA: entry.dlpPeriodAsPerInLOA,
+      agreementNo: entry.agreementNo,
+      siteHandoverDate: formatDate(entry.siteHandoverDate),
+      workCompletionDateAsPerAgreement: formatDate(entry.workCompletionDateAsPerAgreement),
+      wardMemberName: entry.wardMemberName || "",
+      wardMemberPhone: entry.wardMemberPhone || "",
+      overseerName: entry.overseerName || "",
+      overseerPhone: entry.overseerPhone || "",
+      executiveEngineerName: entry.executiveEngineerName || "",
+      executiveEngineerPhone: entry.executiveEngineerPhone || "",
+      assistantEngineerName: entry.assistantEngineerName || "",
+      assistantEngineerPhone: entry.assistantEngineerPhone || "",
+      blockEngineerName: entry.blockEngineerName || "",
+      blockEngineerPhone: entry.blockEngineerPhone || "",
+    });
     setShowForm(true);
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string) => {
     if (confirm("Are you sure you want to delete this project entry?")) {
-      await onDeleteEntry(id);
-      onRefresh();
+      const deletedItem = displayedEntries.find(e => e.id === id);
+      setPendingEntries(prev => prev.filter(e => e.id !== id));
+      onOptimisticDelete?.(id);
+      void (async () => {
+        try {
+          await onDeleteEntry(id);
+        } catch (err) {
+          console.error("Delete failed:", err);
+          alert("Failed to delete project entry. Restoring item...");
+          if (deletedItem) {
+            setPendingEntries(prev => prev.some(e => e.id === id) ? prev : [deletedItem, ...prev]);
+          }
+          await onRefresh();
+        }
+      })();
     }
   };
 
@@ -840,7 +1057,7 @@ export function EntryView({
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Work Name</label>
               <input 
-                type="text" required value={workName} onChange={(e) => setWorkName(e.target.value)}
+                type="text" required value={form.workName} onChange={(e) => setField("workName", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 placeholder="Full title of the project"
               />
@@ -848,14 +1065,14 @@ export function EntryView({
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Amount (Without GST)</label>
               <input 
-                type="number" required value={amount === 0 ? "" : amount} onChange={(e) => setAmount(e.target.value === "" ? 0 : Number(e.target.value))}
+                type="number" required value={form.amount === 0 ? "" : form.amount} onChange={(e) => setField("amount", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Name Of Office</label>
               <input 
-                type="text" required value={nameOfOffice} onChange={(e) => setNameOfOffice(e.target.value)}
+                type="text" required value={form.nameOfOffice} onChange={(e) => setField("nameOfOffice", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 placeholder="e.g. NHAI Regional Office, PWD"
               />
@@ -863,7 +1080,7 @@ export function EntryView({
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">MLA/MP Name (Optional)</label>
               <input 
-                type="text" value={mlaMpName} onChange={(e) => setMlaMpName(e.target.value)}
+                type="text" value={form.mlaMpName} onChange={(e) => setField("mlaMpName", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 placeholder="Constituency details"
               />
@@ -871,7 +1088,7 @@ export function EntryView({
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">LOA Received</label>
               <select 
-                value={loaReceived ? "true" : "false"} onChange={(e) => setLoaReceived(e.target.value === "true")}
+                value={form.loaReceived ? "true" : "false"} onChange={(e) => setField("loaReceived", e.target.value === "true")}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
               >
                 <option value="false">No / Pending</option>
@@ -881,7 +1098,7 @@ export function EntryView({
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">GST Applicable (18%)</label>
               <select 
-                value={gstApplicable ? "true" : "false"} onChange={(e) => setGstApplicable(e.target.value === "true")}
+                value={form.gstApplicable ? "true" : "false"} onChange={(e) => setField("gstApplicable", e.target.value === "true")}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
               >
                 <option value="false">No / Exempt</option>
@@ -891,35 +1108,35 @@ export function EntryView({
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Last Date To Execute Agreement</label>
               <input 
-                type="date" required value={lastDateToExecuteAgreement} onChange={(e) => setLastDateToExecuteAgreement(e.target.value)}
+                type="date" required value={form.lastDateToExecuteAgreement} onChange={(e) => setField("lastDateToExecuteAgreement", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Amount Of Stamp Paper Required</label>
               <input 
-                type="number" required value={amountOfStampPaperRequired === 0 ? "" : amountOfStampPaperRequired} onChange={(e) => setAmountOfStampPaperRequired(e.target.value === "" ? 0 : Number(e.target.value))}
+                type="number" required value={form.amountOfStampPaperRequired === 0 ? "" : form.amountOfStampPaperRequired} onChange={(e) => setField("amountOfStampPaperRequired", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Security Amount</label>
               <input 
-                type="number" required value={securityAmount === 0 ? "" : securityAmount} onChange={(e) => setSecurityAmount(e.target.value === "" ? 0 : Number(e.target.value))}
+                type="number" required value={form.securityAmount === 0 ? "" : form.securityAmount} onChange={(e) => setField("securityAmount", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Performance Guarantee (If Applicable)</label>
               <input 
-                type="number" value={performanceGuarantee === 0 ? "" : performanceGuarantee} onChange={(e) => setPerformanceGuarantee(e.target.value === "" ? 0 : Number(e.target.value))}
+                type="number" value={form.performanceGuarantee === 0 ? "" : form.performanceGuarantee} onChange={(e) => setField("performanceGuarantee", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">DLP Period As Per In LOA</label>
               <input 
-                type="text" required value={dlpPeriodAsPerInLOA} onChange={(e) => setDlpPeriodAsPerInLOA(e.target.value)}
+                type="text" required value={form.dlpPeriodAsPerInLOA} onChange={(e) => setField("dlpPeriodAsPerInLOA", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 placeholder="e.g. 24 Months, 3 Years"
               />
@@ -927,62 +1144,62 @@ export function EntryView({
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Agreement No</label>
               <input 
-                type="text" required value={agreementNo} onChange={(e) => setAgreementNo(e.target.value)}
+                type="text" required value={form.agreementNo} onChange={(e) => setField("agreementNo", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
                 placeholder="AGR-..."
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Ward Member Name</label>
-              <input type="text" value={wardMemberName} onChange={e => setWardMemberName(e.target.value)} className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white" placeholder="Ward Member" />
+              <input type="text" value={form.wardMemberName} onChange={e => setField("wardMemberName", e.target.value)} className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white" placeholder="Ward Member" />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Ward Member Phone</label>
-              <input type="text" value={wardMemberPhone} onChange={e => setWardMemberPhone(e.target.value)} className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white" placeholder="Phone" />
+              <input type="text" value={form.wardMemberPhone} onChange={e => setField("wardMemberPhone", e.target.value)} className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white" placeholder="Phone" />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Overseer Name</label>
-              <input type="text" value={overseerName} onChange={e => setOverseerName(e.target.value)} className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white" placeholder="Overseer" />
+              <input type="text" value={form.overseerName} onChange={e => setField("overseerName", e.target.value)} className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white" placeholder="Overseer" />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Overseer Phone</label>
-              <input type="text" value={overseerPhone} onChange={e => setOverseerPhone(e.target.value)} className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white" placeholder="Phone" />
+              <input type="text" value={form.overseerPhone} onChange={e => setField("overseerPhone", e.target.value)} className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white" placeholder="Phone" />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Executive Engineer Name</label>
-              <input type="text" value={executiveEngineerName} onChange={e => setExecutiveEngineerName(e.target.value)} className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white" placeholder="Executive Engineer" />
+              <input type="text" value={form.executiveEngineerName} onChange={e => setField("executiveEngineerName", e.target.value)} className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white" placeholder="Executive Engineer" />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Executive Engineer Phone</label>
-              <input type="text" value={executiveEngineerPhone} onChange={e => setExecutiveEngineerPhone(e.target.value)} className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white" placeholder="Phone" />
+              <input type="text" value={form.executiveEngineerPhone} onChange={e => setField("executiveEngineerPhone", e.target.value)} className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white" placeholder="Phone" />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Assistant Engineer Name</label>
-              <input type="text" value={assistantEngineerName} onChange={e => setAssistantEngineerName(e.target.value)} className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white" placeholder="Assistant Engineer" />
+              <input type="text" value={form.assistantEngineerName} onChange={e => setField("assistantEngineerName", e.target.value)} className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white" placeholder="Assistant Engineer" />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Assistant Engineer Phone</label>
-              <input type="text" value={assistantEngineerPhone} onChange={e => setAssistantEngineerPhone(e.target.value)} className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white" placeholder="Phone" />
+              <input type="text" value={form.assistantEngineerPhone} onChange={e => setField("assistantEngineerPhone", e.target.value)} className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white" placeholder="Phone" />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Block Engineer Name</label>
-              <input type="text" value={blockEngineerName} onChange={e => setBlockEngineerName(e.target.value)} className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white" placeholder="Block Engineer" />
+              <input type="text" value={form.blockEngineerName} onChange={e => setField("blockEngineerName", e.target.value)} className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white" placeholder="Block Engineer" />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Block Engineer Phone</label>
-              <input type="text" value={blockEngineerPhone} onChange={e => setBlockEngineerPhone(e.target.value)} className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white" placeholder="Phone" />
+              <input type="text" value={form.blockEngineerPhone} onChange={e => setField("blockEngineerPhone", e.target.value)} className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white" placeholder="Phone" />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Site Handover Date</label>
               <input 
-                type="date" required value={siteHandoverDate} onChange={(e) => setSiteHandoverDate(e.target.value)}
+                type="date" required value={form.siteHandoverDate} onChange={(e) => setField("siteHandoverDate", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Work Completion Date As Per Agreement</label>
               <input 
-                type="date" required value={workCompletionDateAsPerAgreement} onChange={(e) => setWorkCompletionDateAsPerAgreement(e.target.value)}
+                type="date" required value={form.workCompletionDateAsPerAgreement} onChange={(e) => setField("workCompletionDateAsPerAgreement", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
               />
             </div>
@@ -991,29 +1208,19 @@ export function EntryView({
           <div className="flex gap-2 justify-end border-t border-neutral-200 pt-3">
             {editingId && (
               <button 
-                type="button" onClick={() => handleEdit(entries.find(e => e.id === editingId)!)}
+                type="button" onClick={() => handleEdit(displayedEntries.find(e => e.id === editingId)!)}
                 className="px-3 py-1.5 border border-neutral-300 hover:bg-neutral-100 text-xs font-semibold rounded text-black bg-white cursor-pointer"
               >
                 Edit
               </button>
             )}
-            {!editingId ? (
-              <button 
-                type="submit"
-                disabled={isSaving}
-                className="px-3 py-1.5 bg-black text-white hover:bg-neutral-850 text-xs font-semibold rounded cursor-pointer disabled:opacity-50"
-              >
-                {isSaving ? "Saving..." : "Save"}
-              </button>
-            ) : (
-              <button 
-                type="submit"
-                disabled={isSaving}
-                className="px-3 py-1.5 bg-black text-white hover:bg-neutral-850 text-xs font-semibold rounded cursor-pointer disabled:opacity-50"
-              >
-                {isSaving ? "Saving..." : "Update"}
-              </button>
-            )}
+            <button 
+              type="submit"
+              disabled={isSaving}
+              className="px-3 py-1.5 bg-black text-white hover:bg-neutral-850 text-xs font-semibold rounded cursor-pointer disabled:opacity-50"
+            >
+              {isSaving ? "Saving..." : editingId ? "Update" : "Save"}
+            </button>
             <button 
               type="button" onClick={clearForm}
               className="px-3 py-1.5 border border-neutral-300 hover:bg-neutral-100 text-xs font-semibold rounded text-black bg-white cursor-pointer"
@@ -1025,12 +1232,6 @@ export function EntryView({
               className="px-3 py-1.5 border border-neutral-300 hover:bg-neutral-100 text-xs font-semibold rounded text-black bg-white cursor-pointer"
             >
               Cancel
-            </button>
-            <button 
-              type="button" onClick={() => { setShowForm(false); setEditingId(null); }}
-              className="px-3 py-1.5 border border-neutral-300 hover:bg-neutral-100 text-xs font-semibold rounded text-black bg-white cursor-pointer"
-            >
-              Back
             </button>
           </div>
         </form>
@@ -1064,7 +1265,7 @@ export function EntryView({
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-100">
-              {filteredEntries.map(e => (
+              {displayedEntries.map(e => (
                 <tr key={e.id} className="hover:bg-neutral-55">
                   <td className="p-3">
                     <button 
@@ -1268,13 +1469,16 @@ export function StockRegisterView({
   stockItems,
   onRefresh,
   onUpdateStockItem,
+  onOptimisticUpdate,
   onNavigate
 }: {
   stockItems: StockRegisterItem[];
   onRefresh: () => void;
   onUpdateStockItem: (id: string, data: any) => Promise<any>;
+  onOptimisticUpdate?: (updated: StockRegisterItem) => void;
   onNavigate: (tab: string) => void;
 }) {
+  const toast = useToast();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -1296,24 +1500,40 @@ export function StockRegisterView({
     setUsedInTonne(item.usedInTonne);
   };
 
-  const handleSave = async (e: React.FormEvent) => {
+  const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingId || isSaving) return;
     setIsSaving(true);
-    try {
-      await onUpdateStockItem(editingId, {
-        inBarrel: Number(inBarrel),
-        inKg: Number(inKg),
-        inTonne: Number(inTonne),
-        usedInTonne: Number(usedInTonne)
-      });
-      setEditingId(null);
-      onRefresh();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsSaving(false);
-    }
+
+    const payload = {
+      materialName,
+      inBarrel: Number(inBarrel),
+      inKg: Number(inKg),
+      inTonne: Number(inTonne),
+      usedInTonne: Number(usedInTonne)
+    };
+    const editId = editingId;
+
+    onOptimisticUpdate?.({
+      id: editId,
+      ...payload,
+      balanceInTonne: payload.inTonne - payload.usedInTonne
+    } as StockRegisterItem);
+
+    toast.success("Stock Updated", `Inventory for ${materialName} updated.`);
+    setEditingId(null);
+    setIsSaving(false);
+
+    void (async () => {
+      try {
+        const saved = await onUpdateStockItem(editId, payload);
+        if (saved) onOptimisticUpdate?.(saved as StockRegisterItem);
+      } catch (err) {
+        console.error('Stock update failed:', err);
+        toast.error("Update Failed", "Could not save stock changes to database.");
+        await onRefresh();
+      }
+    })();
   };
 
   const clearForm = () => {
@@ -1516,6 +1736,8 @@ export function MaterialsUsedView({
   onCreateSiteMaterial,
   onUpdateSiteMaterial,
   onDeleteSiteMaterial,
+  onOptimisticUpdate,
+  onOptimisticDelete,
   onNavigate
 }: {
   entries: Entry[];
@@ -1525,12 +1747,15 @@ export function MaterialsUsedView({
   onCreateSiteMaterial: (data: any) => Promise<any>;
   onUpdateSiteMaterial: (id: string, data: any) => Promise<any>;
   onDeleteSiteMaterial: (id: string) => Promise<any>;
+  onOptimisticUpdate?: (updated: SiteMaterial) => void;
+  onOptimisticDelete?: (id: string) => void;
   onNavigate: (tab: string) => void;
 }) {
   const [selectedEntryId, setSelectedEntryId] = useState("");
   const [showItemForm, setShowItemForm] = useState(false);
   const [itemType, setItemType] = useState<'to_deliver' | 'delivered'>('to_deliver');
   const [workSearchQuery, setWorkSearchQuery] = useState("");
+  const [pendingMaterials, setPendingMaterials] = useState<SiteMaterial[]>([]);
 
   const handleWorkSearch = (query: string) => {
     setWorkSearchQuery(query);
@@ -1575,10 +1800,11 @@ export function MaterialsUsedView({
     setQtyInCum("");
   };
 
-  const handleAddItem = async (e: React.FormEvent) => {
+  const handleAddItem = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedEntryId) return;
-    await onCreateSiteMaterial({
+
+    const payload = {
       entryId: selectedEntryId,
       type: itemType,
       itemSlNo,
@@ -1586,10 +1812,37 @@ export function MaterialsUsedView({
       unit,
       estimatedQuantity: Number(estimatedQuantity),
       deliveredQuantityInCft: Number(deliveredQuantity)
-    });
+    };
+
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const optimisticMat = {
+      ...payload,
+      id: tempId,
+      createdAt: new Date(),
+      ownerEmail: "",
+    } as unknown as SiteMaterial;
+
+    setPendingMaterials(prev => [optimisticMat, ...prev]);
     clearForm();
     setShowItemForm(false);
-    onRefresh();
+
+    void (async () => {
+      try {
+        const saved = await onCreateSiteMaterial(payload);
+        if (saved) {
+          onOptimisticUpdate?.(saved as SiteMaterial);
+          setPendingMaterials(prev => prev.filter(m => m.id !== tempId));
+        } else {
+          setPendingMaterials(prev => prev.filter(m => m.id !== tempId));
+          await onRefresh();
+        }
+      } catch (err) {
+        console.error("Material create failed:", err);
+        setPendingMaterials(prev => prev.filter(m => m.id !== tempId));
+        alert("Failed to save material. Please try again.");
+        await onRefresh();
+      }
+    })();
   };
 
   const handleEditItem = (item: SiteMaterial, type: 'to_deliver' | 'delivered') => {
@@ -1608,15 +1861,29 @@ export function MaterialsUsedView({
     setEditingItemId(item.id);
   };
 
-  const handleSaveEdit = async (id: string) => {
-    if (itemType === 'to_deliver') {
-      await onUpdateSiteMaterial(id, { estimatedQuantity: Number(estimatedQuantity) });
-    } else {
-      await onUpdateSiteMaterial(id, { deliveredQuantityInCft: Number(deliveredQuantity) });
+  const handleSaveEdit = (id: string) => {
+    const payload = itemType === 'to_deliver'
+      ? { estimatedQuantity: Number(estimatedQuantity) }
+      : { deliveredQuantityInCft: Number(deliveredQuantity) };
+
+    const existing = siteMaterials.find(m => m.id === id);
+    if (existing) {
+      onOptimisticUpdate?.({ ...existing, ...payload } as SiteMaterial);
     }
+
     setEditingItemId(null);
     clearForm();
-    onRefresh();
+
+    void (async () => {
+      try {
+        const saved = await onUpdateSiteMaterial(id, payload);
+        if (saved) onOptimisticUpdate?.(saved as SiteMaterial);
+      } catch (err) {
+        console.error("Material edit failed:", err);
+        alert("Failed to update site material. Restoring item...");
+        await onRefresh();
+      }
+    })();
   };
 
   const handleCancelEdit = () => {
@@ -1624,14 +1891,27 @@ export function MaterialsUsedView({
     clearForm();
   };
 
-  const handleDeleteItem = async (id: string) => {
+  const handleDeleteItem = (id: string) => {
     if (confirm("Are you sure you want to delete this site material record?")) {
-      await onDeleteSiteMaterial(id);
-      onRefresh();
+      const deletedItem = currentWorkMaterials.find(m => m.id === id);
+      setPendingMaterials(prev => prev.filter(m => m.id !== id));
+      onOptimisticDelete?.(id);
+      void (async () => {
+        try {
+          await onDeleteSiteMaterial(id);
+        } catch (err) {
+          console.error("Delete failed:", err);
+          alert("Failed to delete site material. Restoring item...");
+          if (deletedItem) {
+            setPendingMaterials(prev => prev.some(m => m.id === id) ? prev : [deletedItem, ...prev]);
+          }
+          await onRefresh();
+        }
+      })();
     }
   };
 
-  const currentWorkMaterials = siteMaterials.filter(m => m.entryId === selectedEntryId);
+  const currentWorkMaterials = [...pendingMaterials, ...siteMaterials].filter(m => m.entryId === selectedEntryId);
   const toDeliverList = currentWorkMaterials.filter(m => m.type === 'to_deliver');
   const deliveredList = currentWorkMaterials.filter(m => m.type === 'delivered');
   const filteredToDeliver = toDeliverList;
@@ -2063,12 +2343,29 @@ export function MaterialsUsedView({
 // ==========================================
 // MODULE 5 – PRIVATE WORK STATUS / ENTRY
 // ==========================================
+const PRIVATE_WORK_FORM_EMPTY = {
+  workName: "",
+  approxAmount: 0,
+  location: "",
+  relatedToContractWork: "",
+  siteVisitDate: "",
+  roadWorkNature: "",
+  completedDate: "",
+  advanceReceived: 0,
+  approxFinalWorkAmount: 0,
+  paymentReceived: 0,
+  remarks: "",
+};
+type PrivateWorkFormState = typeof PRIVATE_WORK_FORM_EMPTY;
+
 export function PrivateWorkView({
   privateWorks,
   onRefresh,
   onCreatePrivateWork,
   onUpdatePrivateWork,
   onDeletePrivateWork,
+  onOptimisticUpdate,
+  onOptimisticDelete,
   onNavigate,
 }: {
   privateWorks: PrivateWork[];
@@ -2076,103 +2373,144 @@ export function PrivateWorkView({
   onCreatePrivateWork: (data: any) => Promise<any>;
   onUpdatePrivateWork: (id: string, data: any) => Promise<any>;
   onDeletePrivateWork: (id: string) => Promise<any>;
-  onNavigate: (tab: string) => void
+  onOptimisticUpdate?: (updated: PrivateWork) => void;
+  onOptimisticDelete?: (id: string) => void;
+  onNavigate: (tab: string) => void;
 }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [selectedPrivateWork, setSelectedPrivateWork] = useState<PrivateWork | null>(null);
 
-  // States
-  const [workName, setWorkName] = useState("");
-  const [approxAmount, setApproxAmount] = useState(0);
-  const [location, setLocation] = useState("");
-  const [relatedToContractWork, setRelatedToContractWork] = useState("");
-  const [siteVisitDate, setSiteVisitDate] = useState("");
-  const [roadWorkNature, setRoadWorkNature] = useState("");
-  const [completedDate, setCompletedDate] = useState("");
-  const [advanceReceived, setAdvanceReceived] = useState(0);
-  const [approxFinalWorkAmount, setApproxFinalWorkAmount] = useState(0);
-  const [paymentReceived, setPaymentReceived] = useState(0);
-  const [remarks, setRemarks] = useState("");
+  const [form, setForm] = useState<PrivateWorkFormState>(PRIVATE_WORK_FORM_EMPTY);
+  const setField = <K extends keyof PrivateWorkFormState>(key: K, value: PrivateWorkFormState[K]) =>
+    setForm(prev => ({ ...prev, [key]: value }));
 
+  const [pendingPrivateWorks, setPendingPrivateWorks] = useState<PrivateWork[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
 
-  const clearForm = () => {
-    setWorkName("");
-    setApproxAmount(0);
-    setLocation("");
-    setRelatedToContractWork("");
-    setSiteVisitDate("");
-    setRoadWorkNature("");
-    setCompletedDate("");
-    setAdvanceReceived(0);
-    setApproxFinalWorkAmount(0);
-    setPaymentReceived(0);
-    setRemarks("");
-  };
+  const displayedPrivateWorks = useMemo(() => {
+    const combined = [...pendingPrivateWorks, ...privateWorks];
+    if (!searchQuery) return combined;
+    const q = searchQuery.toLowerCase();
+    return combined.filter(w =>
+      (w.workName?.toLowerCase() || "").includes(q) ||
+      (w.location?.toLowerCase() || "").includes(q)
+    );
+  }, [pendingPrivateWorks, privateWorks, searchQuery]);
 
-  const handleSave = async (e: React.FormEvent) => {
+  const clearForm = () => setForm(PRIVATE_WORK_FORM_EMPTY);
+
+  const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (isSaving) return;
     setIsSaving(true);
-    try {
-      const payload = {
-        workName,
-        approxAmount: Number(approxAmount),
-        location,
-        relatedToContractWork,
-        siteVisitDate,
-        roadWorkNature,
-        completedDate,
-        advanceReceived: Number(advanceReceived),
-        approxFinalWorkAmount: Number(approxFinalWorkAmount),
-        paymentReceived: Number(paymentReceived),
-        remarks
-      };
-      if (editingId) {
-        await onUpdatePrivateWork(editingId, payload);
-      } else {
-        await onCreatePrivateWork(payload);
-      }
-      clearForm();
-      setEditingId(null);
-      setShowForm(false);
-      onRefresh();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsSaving(false);
+
+    const payload = {
+      workName: form.workName,
+      approxAmount: Number(form.approxAmount),
+      location: form.location,
+      relatedToContractWork: form.relatedToContractWork,
+      siteVisitDate: form.siteVisitDate,
+      roadWorkNature: form.roadWorkNature,
+      completedDate: form.completedDate,
+      advanceReceived: Number(form.advanceReceived),
+      approxFinalWorkAmount: Number(form.approxFinalWorkAmount),
+      paymentReceived: Number(form.paymentReceived),
+      remarks: form.remarks,
+    };
+
+    let optimisticId: string | null = null;
+    if (!editingId) {
+      optimisticId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const optimisticWork = {
+        ...payload,
+        id: optimisticId,
+        paymentBalance: Number(payload.approxFinalWorkAmount || payload.approxAmount) - Number(payload.paymentReceived),
+        createdAt: new Date(),
+        ownerEmail: "",
+      } as unknown as PrivateWork;
+      setPendingPrivateWorks(prev => [optimisticWork, ...prev]);
+    } else {
+      onOptimisticUpdate?.({
+        ...payload,
+        id: editingId,
+        paymentBalance: Number(payload.approxFinalWorkAmount || payload.approxAmount) - Number(payload.paymentReceived),
+      } as unknown as PrivateWork);
     }
+
+    const editId = editingId;
+    const capturedOptimisticId = optimisticId;
+
+    clearForm();
+    setEditingId(null);
+    setShowForm(false);
+    setIsSaving(false);
+
+    void (async () => {
+      try {
+        if (editId) {
+          const saved = await onUpdatePrivateWork(editId, payload);
+          if (saved) onOptimisticUpdate?.(saved as unknown as PrivateWork);
+        } else {
+          const saved = await onCreatePrivateWork(payload);
+          if (saved && saved.id) {
+            onOptimisticUpdate?.(saved as unknown as PrivateWork);
+            setPendingPrivateWorks(prev => prev.filter(item => item.id !== capturedOptimisticId));
+          } else if (capturedOptimisticId) {
+            setPendingPrivateWorks(prev => prev.filter(item => item.id !== capturedOptimisticId));
+          }
+        }
+      } catch (err) {
+        console.error('Private work save failed:', err);
+        if (capturedOptimisticId) {
+          setPendingPrivateWorks(prev => prev.filter(item => item.id !== capturedOptimisticId));
+        }
+        alert('Failed to save private work. Please try again.');
+        await onRefresh();
+      }
+    })();
   };
 
   const handleEdit = (w: PrivateWork) => {
     setEditingId(w.id);
-    setWorkName(w.workName);
-    setApproxAmount(w.approxAmount);
-    setLocation(w.location);
-    setRelatedToContractWork(w.relatedToContractWork || "");
-    setSiteVisitDate(formatDate(w.siteVisitDate));
-    setRoadWorkNature(w.roadWorkNature);
-    setCompletedDate(formatDate(w.completedDate));
-    setAdvanceReceived(w.advanceReceived);
-    setApproxFinalWorkAmount(w.approxFinalWorkAmount);
-    setPaymentReceived(w.paymentReceived);
-    setRemarks(w.remarks || "");
+    setForm({
+      workName: w.workName,
+      approxAmount: w.approxAmount,
+      location: w.location,
+      relatedToContractWork: w.relatedToContractWork || "",
+      siteVisitDate: formatDate(w.siteVisitDate),
+      roadWorkNature: w.roadWorkNature,
+      completedDate: formatDate(w.completedDate),
+      advanceReceived: w.advanceReceived,
+      approxFinalWorkAmount: w.approxFinalWorkAmount,
+      paymentReceived: w.paymentReceived,
+      remarks: w.remarks || "",
+    });
     setShowForm(true);
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string) => {
     if (confirm("Delete this private work record?")) {
-      await onDeletePrivateWork(id);
-      onRefresh();
+      const deletedItem = displayedPrivateWorks.find(w => w.id === id);
+      setPendingPrivateWorks(prev => prev.filter(w => w.id !== id));
+      onOptimisticDelete?.(id);
+      void (async () => {
+        try {
+          await onDeletePrivateWork(id);
+        } catch (err) {
+          console.error("Delete failed:", err);
+          alert("Failed to delete private work. Restoring item...");
+          if (deletedItem) {
+            setPendingPrivateWorks(prev => prev.some(w => w.id === id) ? prev : [deletedItem, ...prev]);
+          }
+          await onRefresh();
+        }
+      })();
     }
   };
 
-  const filtered = privateWorks.filter(w => 
-    w.workName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    w.location.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filtered = displayedPrivateWorks;
 
   return (
     <div className="space-y-6">
@@ -2200,28 +2538,28 @@ export function PrivateWorkView({
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Work Name</label>
               <input 
-                type="text" required value={workName} onChange={(e) => setWorkName(e.target.value)}
+                type="text" required value={form.workName} onChange={(e) => setField("workName", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Approx Amount (₹)</label>
               <input 
-                type="number" required value={approxAmount === 0 ? "" : approxAmount} onChange={(e) => setApproxAmount(e.target.value === "" ? 0 : Number(e.target.value))}
+                type="number" required value={form.approxAmount === 0 ? "" : form.approxAmount} onChange={(e) => setField("approxAmount", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-mono"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Location</label>
               <input 
-                type="text" required value={location} onChange={(e) => setLocation(e.target.value)}
+                type="text" required value={form.location} onChange={(e) => setField("location", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Related To Contract Work (If Any)</label>
               <input 
-                type="text" value={relatedToContractWork} onChange={(e) => setRelatedToContractWork(e.target.value)}
+                type="text" value={form.relatedToContractWork} onChange={(e) => setField("relatedToContractWork", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
                 placeholder="Link to Government project"
               />
@@ -2229,14 +2567,14 @@ export function PrivateWorkView({
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Site Visit Date</label>
               <input 
-                type="date" required value={siteVisitDate} onChange={(e) => setSiteVisitDate(e.target.value)}
+                type="date" required value={form.siteVisitDate} onChange={(e) => setField("siteVisitDate", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Road/Work Nature</label>
               <input 
-                type="text" required value={roadWorkNature} onChange={(e) => setRoadWorkNature(e.target.value)}
+                type="text" required value={form.roadWorkNature} onChange={(e) => setField("roadWorkNature", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
                 placeholder="e.g. Asphalting, Tiling"
               />
@@ -2244,41 +2582,41 @@ export function PrivateWorkView({
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Advance Received (₹)</label>
               <input 
-                type="number" value={advanceReceived === 0 ? "" : advanceReceived} onChange={(e) => setAdvanceReceived(e.target.value === "" ? 0 : Number(e.target.value))}
+                type="number" value={form.advanceReceived === 0 ? "" : form.advanceReceived} onChange={(e) => setField("advanceReceived", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-mono"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Approx Final Work Amount (₹)</label>
               <input 
-                type="number" required value={approxFinalWorkAmount === 0 ? "" : approxFinalWorkAmount} onChange={(e) => setApproxFinalWorkAmount(e.target.value === "" ? 0 : Number(e.target.value))}
+                type="number" required value={form.approxFinalWorkAmount === 0 ? "" : form.approxFinalWorkAmount} onChange={(e) => setField("approxFinalWorkAmount", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-mono"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Payment Received (₹)</label>
               <input 
-                type="number" required value={paymentReceived === 0 ? "" : paymentReceived} onChange={(e) => setPaymentReceived(e.target.value === "" ? 0 : Number(e.target.value))}
+                type="number" required value={form.paymentReceived === 0 ? "" : form.paymentReceived} onChange={(e) => setField("paymentReceived", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-mono"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Payment Balance (₹)</label>
               <div className="w-full px-3 py-2 bg-neutral-50 border border-neutral-200 rounded text-xs font-mono font-bold">
-                ₹{(approxFinalWorkAmount - paymentReceived).toLocaleString()}
+                ₹{((form.approxFinalWorkAmount || form.approxAmount) - form.paymentReceived).toLocaleString()}
               </div>
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Completed Date</label>
               <input 
-                type="date" required value={completedDate} onChange={(e) => setCompletedDate(e.target.value)}
+                type="date" required value={form.completedDate} onChange={(e) => setField("completedDate", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
             </div>
             <div className="col-span-1 md:col-span-3">
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Remarks</label>
               <textarea 
-                rows={2} value={remarks} onChange={(e) => setRemarks(e.target.value)}
+                rows={2} value={form.remarks} onChange={(e) => setField("remarks", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
             </div>
@@ -2472,12 +2810,28 @@ export function PrivateWorkView({
 // ==========================================
 // MODULE 6 – TAR LOAD UPDATION
 // ==========================================
+const TAR_LOAD_FORM_EMPTY = {
+  purchasedFrom: "",
+  item: "VG30" as 'Cement' | 'RS1' | 'SS1' | 'VG30',
+  quantityInKg: 0,
+  loadInNoOfPack: 0,
+  addressedOffice: "",
+  amountPerLoad: 0,
+  paidAmount: 0,
+  purchasedDate: "",
+  billingNameBuyer: "",
+  remarks: "",
+};
+type TarLoadFormState = typeof TAR_LOAD_FORM_EMPTY;
+
 export function TarLoadView({
   tarLoads,
   onRefresh,
   onCreateTarLoad,
   onUpdateTarLoad,
   onDeleteTarLoad,
+  onOptimisticUpdate,
+  onOptimisticDelete,
   onNavigate,
 }: {
   tarLoads: TarLoad[];
@@ -2485,104 +2839,147 @@ export function TarLoadView({
   onCreateTarLoad: (data: any) => Promise<any>;
   onUpdateTarLoad: (id: string, data: any) => Promise<any>;
   onDeleteTarLoad: (id: string) => Promise<any>;
+  onOptimisticUpdate?: (updated: TarLoad) => void;
+  onOptimisticDelete?: (id: string) => void;
   onNavigate: (tab: string) => void;
 }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // States
-  const [purchasedFrom, setPurchasedFrom] = useState("");
-  const [item, setItem] = useState<'Cement' | 'RS1' | 'SS1' | 'VG30'>("VG30");
-  const [quantityInKg, setQuantityInKg] = useState(0);
-  const [loadInNoOfPack, setLoadInNoOfPack] = useState(0);
-  const [addressedOffice, setAddressedOffice] = useState("");
-  const [amountPerLoad, setAmountPerLoad] = useState(0);
-  const [paidAmount, setPaidAmount] = useState(0);
-  const [purchasedDate, setPurchasedDate] = useState("");
-  const [billingNameBuyer, setBillingNameBuyer] = useState("");
-  const [remarks, setRemarks] = useState("");
+  const [form, setForm] = useState<TarLoadFormState>(TAR_LOAD_FORM_EMPTY);
+  const setField = <K extends keyof TarLoadFormState>(key: K, value: TarLoadFormState[K]) =>
+    setForm(prev => ({ ...prev, [key]: value }));
 
+  const [pendingTarLoads, setPendingTarLoads] = useState<TarLoad[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
 
-  const clearForm = () => {
-    setPurchasedFrom("");
-    setItem("VG30");
-    setQuantityInKg(0);
-    setLoadInNoOfPack(0);
-    setAddressedOffice("");
-    setAmountPerLoad(0);
-    setPaidAmount(0);
-    setPurchasedDate("");
-    setBillingNameBuyer("");
-    setRemarks("");
-  };
+  const displayedTarLoads = useMemo(() => {
+    const combined = [...pendingTarLoads, ...tarLoads];
+    if (!searchQuery) return combined;
+    const q = searchQuery.toLowerCase();
+    return combined.filter(t =>
+      (t.purchasedFrom?.toLowerCase() || "").includes(q) ||
+      (t.item?.toLowerCase() || "").includes(q)
+    );
+  }, [pendingTarLoads, tarLoads, searchQuery]);
 
-  const handleSave = async (e: React.FormEvent) => {
+  const clearForm = () => setForm(TAR_LOAD_FORM_EMPTY);
+
+  const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (saving) return;
     setSaving(true);
-    try {
-      const payload = {
-        purchasedFrom,
-        item,
-        quantityInKg: Number(quantityInKg),
-        loadInNoOfPack: Number(loadInNoOfPack),
-        addressedOffice,
-        amountPerLoad: Number(amountPerLoad),
-        paidAmount: Number(paidAmount),
-        purchasedDate,
-        billingNameBuyer,
-        remarks
-      };
-      if (editingId) {
-        await onUpdateTarLoad(editingId, payload);
-      } else {
-        await onCreateTarLoad(payload);
-      }
-      clearForm();
-      setEditingId(null);
-      setShowForm(false);
-      onRefresh();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSaving(false);
+
+    const payload = {
+      purchasedFrom: form.purchasedFrom,
+      item: form.item,
+      quantityInKg: Number(form.quantityInKg),
+      loadInNoOfPack: Number(form.loadInNoOfPack),
+      addressedOffice: form.addressedOffice,
+      amountPerLoad: Number(form.amountPerLoad),
+      paidAmount: Number(form.paidAmount),
+      purchasedDate: form.purchasedDate,
+      billingNameBuyer: form.billingNameBuyer,
+      remarks: form.remarks,
+    };
+
+    let optimisticId: string | null = null;
+    if (!editingId) {
+      optimisticId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const optimisticTar = {
+        ...payload,
+        id: optimisticId,
+        balanceToBePaid: Number(payload.amountPerLoad) - Number(payload.paidAmount),
+        createdAt: new Date(),
+        ownerEmail: "",
+      } as unknown as TarLoad;
+      setPendingTarLoads(prev => [optimisticTar, ...prev]);
+    } else {
+      onOptimisticUpdate?.({
+        ...payload,
+        id: editingId,
+        balanceToBePaid: Number(payload.amountPerLoad) - Number(payload.paidAmount),
+      } as unknown as TarLoad);
     }
+
+    const editId = editingId;
+    const capturedOptimisticId = optimisticId;
+
+    clearForm();
+    setEditingId(null);
+    setShowForm(false);
+    setSaving(false);
+
+    void (async () => {
+      try {
+        if (editId) {
+          const saved = await onUpdateTarLoad(editId, payload);
+          if (saved) onOptimisticUpdate?.(saved as unknown as TarLoad);
+        } else {
+          const saved = await onCreateTarLoad(payload);
+          if (saved && saved.id) {
+            onOptimisticUpdate?.(saved as unknown as TarLoad);
+            setPendingTarLoads(prev => prev.filter(item => item.id !== capturedOptimisticId));
+          } else if (capturedOptimisticId) {
+            setPendingTarLoads(prev => prev.filter(item => item.id !== capturedOptimisticId));
+          }
+        }
+      } catch (err) {
+        console.error('Tar load save failed:', err);
+        if (capturedOptimisticId) {
+          setPendingTarLoads(prev => prev.filter(item => item.id !== capturedOptimisticId));
+        }
+        alert('Failed to save tar load. Please try again.');
+        await onRefresh();
+      }
+    })();
   };
 
   const handleEdit = (load: TarLoad) => {
     setEditingId(load.id);
-    setPurchasedFrom(load.purchasedFrom);
-    setItem(load.item);
-    setQuantityInKg(load.quantityInKg);
-    setLoadInNoOfPack(load.loadInNoOfPack);
-    setAddressedOffice(load.addressedOffice);
-    setAmountPerLoad(load.amountPerLoad || 0);
-    setPaidAmount(load.paidAmount);
-    setPurchasedDate(formatDate(load.purchasedDate));
-    setBillingNameBuyer(load.billingNameBuyer);
-    setRemarks(load.remarks || "");
+    setForm({
+      purchasedFrom: load.purchasedFrom,
+      item: load.item,
+      quantityInKg: load.quantityInKg,
+      loadInNoOfPack: load.loadInNoOfPack,
+      addressedOffice: load.addressedOffice,
+      amountPerLoad: load.amountPerLoad || 0,
+      paidAmount: load.paidAmount,
+      purchasedDate: formatDate(load.purchasedDate),
+      billingNameBuyer: load.billingNameBuyer,
+      remarks: load.remarks || "",
+    });
     setShowForm(true);
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string) => {
     if (confirm("Delete this tar load sheet?")) {
-      await onDeleteTarLoad(id);
-      onRefresh();
+      const deletedItem = displayedTarLoads.find(t => t.id === id);
+      setPendingTarLoads(prev => prev.filter(t => t.id !== id));
+      onOptimisticDelete?.(id);
+      void (async () => {
+        try {
+          await onDeleteTarLoad(id);
+        } catch (err) {
+          console.error("Delete failed:", err);
+          alert("Failed to delete tar load. Restoring item...");
+          if (deletedItem) {
+            setPendingTarLoads(prev => prev.some(t => t.id === id) ? prev : [deletedItem, ...prev]);
+          }
+          await onRefresh();
+        }
+      })();
     }
   };
 
-  const totalKg = tarLoads.reduce((sum, item) => sum + item.quantityInKg, 0);
-  const totalPacks = tarLoads.reduce((sum, item) => sum + item.loadInNoOfPack, 0);
-  const totalAmount = tarLoads.reduce((sum, item) => sum + (item.amountPerLoad || 0), 0);
-  const totalPaid = tarLoads.reduce((sum, item) => sum + item.paidAmount, 0);
+  const totalKg = displayedTarLoads.reduce((sum, item) => sum + item.quantityInKg, 0);
+  const totalPacks = displayedTarLoads.reduce((sum, item) => sum + item.loadInNoOfPack, 0);
+  const totalAmount = displayedTarLoads.reduce((sum, item) => sum + (item.amountPerLoad || 0), 0);
+  const totalPaid = displayedTarLoads.reduce((sum, item) => sum + item.paidAmount, 0);
   const totalBalance = totalAmount - totalPaid;
 
-  const filtered = tarLoads.filter(t => 
-    t.purchasedFrom.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    t.item.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filtered = displayedTarLoads;
 
   return (
     <div className="space-y-6">
@@ -2650,14 +3047,14 @@ export function TarLoadView({
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Purchased From</label>
               <input 
-                type="text" required value={purchasedFrom} onChange={(e) => setPurchasedFrom(e.target.value)}
+                type="text" required value={form.purchasedFrom} onChange={(e) => setField("purchasedFrom", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Tar Emulsion / Item</label>
               <select 
-                value={item} onChange={(e) => setItem(e.target.value as any)}
+                value={form.item} onChange={(e) => setField("item", e.target.value as any)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               >
                 <option value="Cement">Cement</option>
@@ -2669,62 +3066,62 @@ export function TarLoadView({
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Quantity In KG</label>
               <input 
-                type="number" required value={quantityInKg === 0 ? "" : quantityInKg} onChange={(e) => setQuantityInKg(e.target.value === "" ? 0 : Number(e.target.value))}
+                type="number" required value={form.quantityInKg === 0 ? "" : form.quantityInKg} onChange={(e) => setField("quantityInKg", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-mono"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Load In No. Of Pack</label>
               <input 
-                type="number" required value={loadInNoOfPack === 0 ? "" : loadInNoOfPack} onChange={(e) => setLoadInNoOfPack(e.target.value === "" ? 0 : Number(e.target.value))}
+                type="number" required value={form.loadInNoOfPack === 0 ? "" : form.loadInNoOfPack} onChange={(e) => setField("loadInNoOfPack", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-mono"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Addressed Office</label>
               <input 
-                type="text" required value={addressedOffice} onChange={(e) => setAddressedOffice(e.target.value)}
+                type="text" required value={form.addressedOffice} onChange={(e) => setField("addressedOffice", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Purchased Date</label>
               <input 
-                type="date" required value={purchasedDate} onChange={(e) => setPurchasedDate(e.target.value)}
+                type="date" required value={form.purchasedDate} onChange={(e) => setField("purchasedDate", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Amount Per Load</label>
               <input 
-                type="number" required value={amountPerLoad === 0 ? "" : amountPerLoad} onChange={(e) => setAmountPerLoad(e.target.value === "" ? 0 : Number(e.target.value))}
+                type="number" required value={form.amountPerLoad === 0 ? "" : form.amountPerLoad} onChange={(e) => setField("amountPerLoad", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-mono"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Paid Amount</label>
               <input 
-                type="number" required value={paidAmount === 0 ? "" : paidAmount} onChange={(e) => setPaidAmount(e.target.value === "" ? 0 : Number(e.target.value))}
+                type="number" required value={form.paidAmount === 0 ? "" : form.paidAmount} onChange={(e) => setField("paidAmount", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-mono"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Balance To Be Paid</label>
               <div className="w-full px-3 py-2 bg-neutral-50 border border-neutral-200 rounded text-xs font-mono font-bold">
-                ₹{(amountPerLoad - paidAmount).toLocaleString()}
+                ₹{(form.amountPerLoad - form.paidAmount).toLocaleString()}
               </div>
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Billing Name/Buyer</label>
               <input 
-                type="text" required value={billingNameBuyer} onChange={(e) => setBillingNameBuyer(e.target.value)}
+                type="text" required value={form.billingNameBuyer} onChange={(e) => setField("billingNameBuyer", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-semibold"
               />
             </div>
             <div className="col-span-1 md:col-span-2">
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Remarks</label>
               <textarea 
-                rows={1} value={remarks} onChange={(e) => setRemarks(e.target.value)}
+                rows={1} value={form.remarks} onChange={(e) => setField("remarks", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
             </div>
@@ -2812,6 +3209,8 @@ export function WorkBasedEntryView({
   onCreateWorkBasedEntry,
   onUpdateWorkBasedEntry,
   onDeleteWorkBasedEntry,
+  onOptimisticUpdate,
+  onOptimisticDelete,
   onNavigate
 }: {
   entries: Entry[];
@@ -2821,12 +3220,16 @@ export function WorkBasedEntryView({
   onCreateWorkBasedEntry: (data: any) => Promise<any>;
   onUpdateWorkBasedEntry: (id: string, data: any) => Promise<any>;
   onDeleteWorkBasedEntry: (id: string) => Promise<any>;
-  onNavigate: (tab: string) => void}) {
+  onOptimisticUpdate?: (updated: WorkBasedEntry) => void;
+  onOptimisticDelete?: (id: string) => void;
+  onNavigate: (tab: string) => void;
+}) {
   const [selectedEntryId, setSelectedEntryId] = useState("");
   const [showForm, setShowForm] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [pendingWorkBasedEntries, setPendingWorkBasedEntries] = useState<WorkBasedEntry[]>([]);
 
   const handleWorkSearch = (query: string) => {
     setSearchQuery(query);
@@ -2863,33 +3266,70 @@ export function WorkBasedEntryView({
     setItemUnit("CUM");
   };
 
-  const handleSave = async (e: React.FormEvent) => {
+  const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedEntryId || isSaving) return;
     setIsSaving(true);
-    try {
-      const payload = {
-        entryId: selectedEntryId,
-        itemSlNo,
-        itemName,
-        itemQuantity: Number(itemQuantity),
-        itemRateAsPerEstimate: Number(itemRateAsPerEstimate),
-        itemUnit
-      };
-      if (editingId) {
-        await onUpdateWorkBasedEntry(editingId, payload);
-      } else {
-        await onCreateWorkBasedEntry(payload);
-      }
-      clearForm();
-      setEditingId(null);
-      setShowForm(false);
-      onRefresh();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsSaving(false);
+
+    const payload = {
+      entryId: selectedEntryId,
+      itemSlNo,
+      itemName,
+      itemQuantity: Number(itemQuantity),
+      itemRateAsPerEstimate: Number(itemRateAsPerEstimate),
+      itemUnit
+    };
+
+    let optimisticId: string | null = null;
+    if (!editingId) {
+      optimisticId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const optimisticItem = {
+        ...payload,
+        id: optimisticId,
+        totalAmountPerItem: Number(payload.itemQuantity) * Number(payload.itemRateAsPerEstimate),
+        createdAt: new Date(),
+        ownerEmail: "",
+      } as unknown as WorkBasedEntry;
+      setPendingWorkBasedEntries(prev => [optimisticItem, ...prev]);
+    } else {
+      onOptimisticUpdate?.({
+        ...payload,
+        id: editingId,
+        totalAmountPerItem: Number(payload.itemQuantity) * Number(payload.itemRateAsPerEstimate),
+      } as unknown as WorkBasedEntry);
     }
+
+    const editId = editingId;
+    const capturedOptimisticId = optimisticId;
+
+    clearForm();
+    setEditingId(null);
+    setShowForm(false);
+    setIsSaving(false);
+
+    void (async () => {
+      try {
+        if (editId) {
+          const saved = await onUpdateWorkBasedEntry(editId, payload);
+          if (saved) onOptimisticUpdate?.(saved as unknown as WorkBasedEntry);
+        } else {
+          const saved = await onCreateWorkBasedEntry(payload);
+          if (saved && saved.id) {
+            onOptimisticUpdate?.(saved as unknown as WorkBasedEntry);
+            setPendingWorkBasedEntries(prev => prev.filter(item => item.id !== capturedOptimisticId));
+          } else if (capturedOptimisticId) {
+            setPendingWorkBasedEntries(prev => prev.filter(item => item.id !== capturedOptimisticId));
+          }
+        }
+      } catch (err) {
+        console.error("BOQ item save failed:", err);
+        if (capturedOptimisticId) {
+          setPendingWorkBasedEntries(prev => prev.filter(item => item.id !== capturedOptimisticId));
+        }
+        alert("Failed to save BOQ item. Please try again.");
+        await onRefresh();
+      }
+    })();
   };
 
   const handleEdit = (wbe: WorkBasedEntry) => {
@@ -2902,14 +3342,27 @@ export function WorkBasedEntryView({
     setShowForm(true);
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string) => {
     if (confirm("Delete this BOQ line item?")) {
-      await onDeleteWorkBasedEntry(id);
-      onRefresh();
+      const deletedItem = filteredItems.find(w => w.id === id);
+      setPendingWorkBasedEntries(prev => prev.filter(w => w.id !== id));
+      onOptimisticDelete?.(id);
+      void (async () => {
+        try {
+          await onDeleteWorkBasedEntry(id);
+        } catch (err) {
+          console.error("Delete failed:", err);
+          alert("Failed to delete BOQ line item. Restoring item...");
+          if (deletedItem) {
+            setPendingWorkBasedEntries(prev => prev.some(w => w.id === id) ? prev : [deletedItem, ...prev]);
+          }
+          await onRefresh();
+        }
+      })();
     }
   };
 
-  const filteredItems = workBasedEntries.filter(wbe => wbe.entryId === selectedEntryId);
+  const filteredItems = [...pendingWorkBasedEntries, ...workBasedEntries].filter(wbe => wbe.entryId === selectedEntryId);
   const totalBOQValuation = filteredItems.reduce((sum, item) => sum + item.totalAmountPerItem, 0);
 
   const filteredWorkOptions = [
@@ -2959,8 +3412,13 @@ export function WorkBasedEntryView({
             </div>
             {!showForm && (
               <button 
-                onClick={() => { clearForm(); setEditingId(null); setShowForm(true); }}
-                className="px-3 py-1.5 bg-black text-white hover:bg-neutral-900 text-xs font-semibold rounded uppercase tracking-wider flex items-center gap-1"
+                onClick={() => {
+                  clearForm();
+                  setEditingId(null);
+                  setItemSlNo((filteredItems.length + 1).toString());
+                  setShowForm(true);
+                }}
+                className="px-3 py-1.5 bg-black text-white hover:bg-neutral-900 text-xs font-semibold rounded uppercase tracking-wider flex items-center gap-1 cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" /> Add Estimate Item
               </button>
@@ -2972,12 +3430,41 @@ export function WorkBasedEntryView({
               <h4 className="text-xs font-bold uppercase border-b border-neutral-100 pb-2">{editingId ? "Update BOQ Item" : "New BOQ Item Details"}</h4>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 <div>
-                  <label className="block text-[10px] uppercase font-bold text-neutral-400 mb-1">Item Sl No</label>
-                  <input type="text" placeholder="e.g. 1.1" required value={itemSlNo} onChange={(e) => setItemSlNo(e.target.value)} className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs" />
+                  <label className="block text-[10px] uppercase font-bold text-neutral-400 mb-1">Item Sl No (Auto)</label>
+                  <input type="text" placeholder="Auto" required value={itemSlNo} onChange={(e) => setItemSlNo(e.target.value)} className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs font-mono bg-neutral-50" />
                 </div>
                 <div className="col-span-2 md:col-span-1">
                   <label className="block text-[10px] uppercase font-bold text-neutral-400 mb-1">Item Name/Spec</label>
-                  <input type="text" required value={itemName} onChange={(e) => setItemName(e.target.value)} className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs" />
+                  <input
+                    type="text"
+                    list="work-item-suggestions"
+                    required
+                    value={itemName}
+                    onChange={(e) => setItemName(e.target.value)}
+                    placeholder="Type or select suggestion..."
+                    className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs"
+                  />
+                  <datalist id="work-item-suggestions">
+                    <option value="Earthwork Excavation" />
+                    <option value="PCC (Plain Cement Concrete)" />
+                    <option value="RCC (Reinforced Cement Concrete)" />
+                    <option value="Reinforcement Steel / TMT Bars" />
+                    <option value="Brick Masonry" />
+                    <option value="Block Masonry" />
+                    <option value="Plastering Work" />
+                    <option value="Flooring & Tiling" />
+                    <option value="Formwork / Shuttering" />
+                    <option value="Concrete Work" />
+                    <option value="Foundation Work" />
+                    <option value="Column & Beam Work" />
+                    <option value="Slab Work" />
+                    <option value="Drain Work" />
+                    <option value="Road & Tar Work" />
+                    <option value="Waterproofing" />
+                    <option value="Painting & Finishing" />
+                    <option value="Electrical Work" />
+                    <option value="Plumbing & Sanitary Work" />
+                  </datalist>
                 </div>
                 <div>
                   <label className="block text-[10px] uppercase font-bold text-neutral-400 mb-1">Item Quantity</label>
@@ -3599,11 +4086,13 @@ export function OfficeWiseWorkView({
 export function WorkStatusUpdationView({
   entries,
   onRefresh,
-  onUpdateEntry
+  onUpdateEntry,
+  onOptimisticUpdate
 }: {
   entries: Entry[];
   onRefresh: () => void;
   onUpdateEntry: (id: string, data: any) => Promise<any>;
+  onOptimisticUpdate?: (updated: Entry) => void;
 }) {
   const [selectedEntryId, setSelectedEntryId] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -3642,6 +4131,7 @@ export function WorkStatusUpdationView({
   const [status, setStatus] = useState<'Not Started' | 'Ongoing' | 'Pending' | 'Completed'>('Not Started');
   const [paymentReceived, setPaymentReceived] = useState(0);
 
+  const toast = useToast();
   const [message, setMessage] = useState("");
 
   const handleSelectWork = (id: string) => {
@@ -3668,9 +4158,19 @@ export function WorkStatusUpdationView({
     setPaymentReceived(entry.paymentReceived || 0);
   };
 
-  const handleUpdate = async (e: React.FormEvent) => {
+  const handleUpdate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedEntryId) return;
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (
+      (lastDateToExecuteAgreement && lastDateToExecuteAgreement > todayStr) ||
+      (siteHandoverDate && siteHandoverDate > todayStr)
+    ) {
+      toast.error("Invalid Date", "Future transaction dates are not allowed.");
+      return;
+    }
+
     const payload = {
       workName,
       amount: Number(amount),
@@ -3689,9 +4189,20 @@ export function WorkStatusUpdationView({
       status,
       paymentReceived: Number(paymentReceived)
     };
-    await onUpdateEntry(selectedEntryId, payload);
-    setMessage("Success: Work status records updated successfully.");
-    onRefresh();
+
+    onOptimisticUpdate?.({ id: selectedEntryId, ...payload } as unknown as Entry);
+    toast.success("Status Updated", `Work status for "${workName}" updated successfully.`);
+
+    void (async () => {
+      try {
+        const saved = await onUpdateEntry(selectedEntryId, payload);
+        if (saved) onOptimisticUpdate?.(saved as unknown as Entry);
+      } catch (err) {
+        console.error("Status update failed:", err);
+        toast.error("Update Failed", "Could not persist status change to server.");
+        await onRefresh();
+      }
+    })();
   };
 
   const filteredEntries = entries.filter(e => 
@@ -3897,6 +4408,8 @@ export function ExpenseUpdationView({
   onCreateExpense,
   onUpdateExpense,
   onDeleteExpense,
+  onOptimisticUpdate,
+  onOptimisticDelete,
   onNavigate
 }: {
   entries: Entry[];
@@ -3906,13 +4419,17 @@ export function ExpenseUpdationView({
   onCreateExpense: (data: any) => Promise<any>;
   onUpdateExpense: (id: string, data: any) => Promise<any>;
   onDeleteExpense: (id: string) => Promise<any>;
+  onOptimisticUpdate?: (updated: Expense) => void;
+  onOptimisticDelete?: (id: string) => void;
   onNavigate: (tab: string) => void;
 }) {
+  const toast = useToast();
   const [selectedEntryId, setSelectedEntryId] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [pendingExpenses, setPendingExpenses] = useState<Expense[]>([]);
 
   const getLocalDateString = () => {
     const d = new Date();
@@ -3963,34 +4480,74 @@ export function ExpenseUpdationView({
     setAmount("");
   };
 
-  const handleSave = async (e: React.FormEvent) => {
+  const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedEntryId || isSaving) return;
-    setIsSaving(true);
-    try {
-      const finalDescription = description === "Others" ? customDescription : description;
 
-      const payload = {
-        workId: selectedEntryId,
-        date,
-        description: finalDescription,
-        amount: Number(amount)
-      };
-
-      if (editingId) {
-        await onUpdateExpense(editingId, payload);
-      } else {
-        await onCreateExpense(payload);
-      }
-      clearForm();
-      setEditingId(null);
-      setShowForm(false);
-      onRefresh();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsSaving(false);
+    if (date > getLocalDateString()) {
+      toast.error("Invalid Date", "Future transaction dates are not allowed.");
+      return;
     }
+
+    setIsSaving(true);
+
+    const finalDescription = description === "Others" ? customDescription : description;
+    const payload = {
+      workId: selectedEntryId,
+      date,
+      description: finalDescription,
+      amount: Number(amount)
+    };
+
+    let optimisticId: string | null = null;
+    if (!editingId) {
+      optimisticId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const optimisticExp = {
+        ...payload,
+        id: optimisticId,
+        createdAt: new Date().toISOString(),
+        ownerEmail: "",
+      } as unknown as Expense;
+      setPendingExpenses(prev => [optimisticExp, ...prev]);
+    } else {
+      onOptimisticUpdate?.({
+        ...payload,
+        id: editingId,
+      } as unknown as Expense);
+    }
+
+    const editId = editingId;
+    const capturedOptimisticId = optimisticId;
+
+    toast.success("Expense Recorded", `₹${Number(amount).toLocaleString()} logged for ${finalDescription}.`);
+    clearForm();
+    setEditingId(null);
+    setShowForm(false);
+    setIsSaving(false);
+
+    void (async () => {
+      try {
+        if (editId) {
+          const saved = await onUpdateExpense(editId, payload);
+          if (saved) onOptimisticUpdate?.(saved as unknown as Expense);
+        } else {
+          const saved = await onCreateExpense(payload);
+          if (saved && saved.id) {
+            onOptimisticUpdate?.(saved as unknown as Expense);
+            setPendingExpenses(prev => prev.filter(item => item.id !== capturedOptimisticId));
+          } else if (capturedOptimisticId) {
+            setPendingExpenses(prev => prev.filter(item => item.id !== capturedOptimisticId));
+          }
+        }
+      } catch (err) {
+        console.error("Expense save failed:", err);
+        if (capturedOptimisticId) {
+          setPendingExpenses(prev => prev.filter(item => item.id !== capturedOptimisticId));
+        }
+        toast.error("Save Failed", "Failed to save expense transaction.");
+        await onRefresh();
+      }
+    })();
   };
 
   const handleEdit = (exp: Expense) => {
@@ -4007,14 +4564,27 @@ export function ExpenseUpdationView({
     setShowForm(true);
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string) => {
     if (confirm("Delete this expense record?")) {
-      await onDeleteExpense(id);
-      onRefresh();
+      const deletedItem = filteredExpenses.find(e => e.id === id);
+      setPendingExpenses(prev => prev.filter(e => e.id !== id));
+      onOptimisticDelete?.(id);
+      void (async () => {
+        try {
+          await onDeleteExpense(id);
+        } catch (err) {
+          console.error("Delete failed:", err);
+          alert("Failed to delete expense. Restoring item...");
+          if (deletedItem) {
+            setPendingExpenses(prev => prev.some(e => e.id === id) ? prev : [deletedItem, ...prev]);
+          }
+          await onRefresh();
+        }
+      })();
     }
   };
 
-  const filteredExpenses = expenses.filter(exp => exp.workId === selectedEntryId);
+  const filteredExpenses = [...pendingExpenses, ...expenses].filter(exp => exp.workId === selectedEntryId);
   const totalExpenseValuation = filteredExpenses.reduce((sum, exp) => sum + exp.amount, 0);
 
   const filteredWorkOptions = [

@@ -42,13 +42,23 @@ function parseDates<T extends Record<string, any>>(data: T, keys: (keyof T)[]): 
   return clone;
 }
 
-/** READ helper — executes Prisma query and logs warnings if error occurs. */
+function withTimeout<T>(promise: Promise<T>, ms = 1500): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Database query timed out')), ms);
+    promise.then(
+      (res) => { clearTimeout(timer); resolve(res); },
+      (err) => { clearTimeout(timer); reject(err); }
+    );
+  });
+}
+
+/** READ helper — executes Prisma query with safe 5s timeout and logs warnings if error occurs. */
 async function readDb<T>(dbFn: () => Promise<T>, fallback: () => T): Promise<T> {
   try {
-    return serialize(await dbFn());
+    return serialize(await withTimeout(dbFn(), 5000));
   } catch (err) {
-    console.error('⚠️  DB Error:', (err as Error).message?.slice(0, 200));
-    // If running in development/fallback, return fallback
+    console.warn('⚠️  DB Read Warning (using fallback):', (err as Error).message?.slice(0, 200));
+    // Return fallback data gracefully
     return serialize(fallback());
   }
 }
@@ -112,19 +122,13 @@ class DbService {
       prisma.cementLoad.findMany({
         where: {
           ownerEmail,
-          OR: [
-            { deletedAt: { isSet: false } },
-            { deletedAt: null }
-          ]
+          deletedAt: null,
         }
       }),
       prisma.tarLoad.findMany({
         where: {
           ownerEmail,
-          OR: [
-            { deletedAt: { isSet: false } },
-            { deletedAt: null }
-          ]
+          deletedAt: null,
         }
       }),
       prisma.siteMaterial.findMany({
@@ -224,10 +228,29 @@ class DbService {
     data: Omit<CementLoad, 'id' | 'balanceAmount' | 'createdAt'>,
     ownerEmail: string,
   ): Promise<CementLoad> {
-    const parsed = parseDates(data, ['purchaseDate', 'currentStockDate', 'paymentBillDate']);
-    const balanceAmount = parsed.amountPerLoad - parsed.paidAmount;
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+
+    // Guarantee valid purchaseDate (fallback to today if missing/empty)
+    let purchaseDate = data.purchaseDate ? new Date(data.purchaseDate) : new Date();
+    if (isNaN(purchaseDate.getTime())) {
+      purchaseDate = new Date();
+    }
+    if (purchaseDate > endOfToday) {
+      throw new Error("Future dates are not allowed for purchase date");
+    }
+
+    const parsed = parseDates(data, ['currentStockDate', 'paymentBillDate']);
+    delete (parsed as any).purchaseDate;
+    const balanceAmount = (parsed.amountPerLoad || 0) - (parsed.paidAmount || 0);
+
     const created = await writeDb(() => prisma.cementLoad.create({
-      data: { ...parsed, balanceAmount, ownerEmail } as any,
+      data: {
+        ...parsed,
+        purchaseDate,
+        balanceAmount,
+        ownerEmail,
+      } as any,
     })) as unknown as CementLoad;
     this.recalculateStockRegister(ownerEmail).catch(err => console.error("Recalculate stock register error:", err));
     return created;
@@ -238,6 +261,16 @@ class DbService {
     updates: Partial<CementLoad>,
     ownerEmail: string,
   ): Promise<CementLoad | null> {
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+
+    if (updates.purchaseDate) {
+      const pDate = new Date(updates.purchaseDate);
+      if (!isNaN(pDate.getTime()) && pDate > endOfToday) {
+        throw new Error("Future dates are not allowed for purchase date");
+      }
+    }
+
     const updated = await writeDb(async () => {
       const old = await prisma.cementLoad.findFirst({ where: { id, ownerEmail } });
       if (!old) return null;
@@ -288,9 +321,30 @@ class DbService {
     data: Omit<Entry, 'id' | 'createdAt' | 'updatedAt'>,
     ownerEmail: string,
   ): Promise<Entry> {
-    const parsed = parseDates(data, ['lastDateToExecuteAgreement', 'siteHandoverDate', 'workCompletionDateAsPerAgreement', 'actualCompletionDate']);
+    const today = new Date();
+
+    let lastDateToExecuteAgreement = data.lastDateToExecuteAgreement ? new Date(data.lastDateToExecuteAgreement) : today;
+    if (isNaN(lastDateToExecuteAgreement.getTime())) lastDateToExecuteAgreement = today;
+
+    let siteHandoverDate = data.siteHandoverDate ? new Date(data.siteHandoverDate) : today;
+    if (isNaN(siteHandoverDate.getTime())) siteHandoverDate = today;
+
+    let workCompletionDateAsPerAgreement = data.workCompletionDateAsPerAgreement ? new Date(data.workCompletionDateAsPerAgreement) : today;
+    if (isNaN(workCompletionDateAsPerAgreement.getTime())) workCompletionDateAsPerAgreement = today;
+
+    const parsed = parseDates(data, ['actualCompletionDate']);
+    delete (parsed as any).lastDateToExecuteAgreement;
+    delete (parsed as any).siteHandoverDate;
+    delete (parsed as any).workCompletionDateAsPerAgreement;
+
     return writeDb(() => prisma.entry.create({
-      data: { ...parsed, ownerEmail } as any,
+      data: {
+        ...parsed,
+        lastDateToExecuteAgreement,
+        siteHandoverDate,
+        workCompletionDateAsPerAgreement,
+        ownerEmail,
+      } as any,
     })) as unknown as Promise<Entry>;
   }
 
@@ -506,10 +560,16 @@ class DbService {
     data: Omit<TarLoad, 'id' | 'balanceToBePaid' | 'createdAt'>,
     ownerEmail: string,
   ): Promise<TarLoad> {
-    const parsed = parseDates(data, ['purchasedDate', 'currentStockDate', 'paymentBillDate']);
-    const balanceToBePaid = parsed.amountPerLoad - parsed.paidAmount;
+    const today = new Date();
+    let purchasedDate = data.purchasedDate ? new Date(data.purchasedDate) : today;
+    if (isNaN(purchasedDate.getTime())) purchasedDate = today;
+
+    const parsed = parseDates(data, ['currentStockDate', 'paymentBillDate']);
+    delete (parsed as any).purchasedDate;
+    const balanceToBePaid = (parsed.amountPerLoad || 0) - (parsed.paidAmount || 0);
+
     const created = await writeDb(() => prisma.tarLoad.create({
-      data: { ...parsed, balanceToBePaid, ownerEmail } as any,
+      data: { ...parsed, purchasedDate, balanceToBePaid, ownerEmail } as any,
     })) as unknown as TarLoad;
     this.recalculateStockRegister(ownerEmail).catch(err => console.error("Recalculate stock register error:", err));
     return created;
@@ -602,10 +662,7 @@ class DbService {
       () => prisma.expense.findMany({
         where: {
           ownerEmail,
-          OR: [
-            { deletedAt: { isSet: false } },
-            { deletedAt: null }
-          ]
+          deletedAt: null,
         },
         orderBy: { createdAt: 'desc' },
       }) as unknown as Promise<Expense[]>,
@@ -619,10 +676,7 @@ class DbService {
         where: {
           workId,
           ownerEmail,
-          OR: [
-            { deletedAt: { isSet: false } },
-            { deletedAt: null }
-          ]
+          deletedAt: null,
         },
         orderBy: { date: 'desc' },
       }) as unknown as Promise<Expense[]>,

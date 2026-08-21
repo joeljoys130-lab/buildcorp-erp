@@ -1,213 +1,198 @@
 /**
  * src/lib/auth/otp.service.ts
  * ─────────────────────────────────────────────────────────────────────────────
- * Unified OTP Service.
+ * Unified Email OTP Service.
  * Handles generation, hashing, rate limiting, attempt tracking, lockouts,
- * validation, and channel-based dispatch (Email / SMS).
+ * validation, and email dispatch.
  */
 
 import crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import prisma from '../prisma';
 import { sendOtpEmail } from './email';
-import { SmsService } from './sms.service';
 import { logger } from '../logger';
 
 const OTP_EXPIRY_MINUTES = parseInt(process.env.OTP_EXPIRY_MINUTES || '5', 10);
 const OTP_RESEND_SECONDS = parseInt(process.env.OTP_RESEND_SECONDS || '30', 10);
 const OTP_MAX_ATTEMPTS = parseInt(process.env.OTP_MAX_ATTEMPTS || '5', 10);
 
-/** In-memory OTP fallback store used when MongoDB is unreachable. */
-const MEM_OTP: Record<string, { hash: string; expiresAt: number; createdAt: number }> = {};
+/** Helper: Wrap promise with a fast timeout so DB network latency never hangs execution. */
+function withTimeout<T>(promise: Promise<T>, ms = 1200): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Database operation timeout')), ms);
+    promise.then(
+      (res) => { clearTimeout(timer); resolve(res); },
+      (err) => { clearTimeout(timer); reject(err); }
+    );
+  });
+}
 
+/** In-memory OTP fallback store used when MongoDB is unreachable or timing out. */
+const MEM_OTP: Record<string, { hash: string; expiresAt: number; createdAt: number }> = {};
 
 export class OtpService {
   /**
-   * Generates a secure random 6-digit OTP.
+   * Generates a cryptographically secure random 6-digit OTP.
    */
-  public static generateOtpString(email: string): string {
-    if (email.toLowerCase() === 'test@buildcorp.com') {
-      return '999999';
-    }
+  public static generateOtpString(_email: string): string {
     const num = crypto.randomInt(100000, 1000000);
     return num.toString();
   }
 
   /**
-   * Request/Send a new OTP to the specified user/channel/destination.
+   * Request/Send a new Email OTP to the specified user.
    * Invalidates any active/previous OTPs for this user first.
    */
   public static async requestOtp(params: {
     userId: string;
     email: string;
-    channel: 'email' | 'phone';
-    destination: string;
+    channel?: 'email';
+    destination?: string;
     ip?: string;
     userAgent?: string;
   }): Promise<{ success: boolean; error?: string; retryAfter?: number }> {
-    const { userId, email, channel, destination, ip, userAgent } = params;
+    const { userId, email, ip, userAgent } = params;
+    const destination = email;
+    const channel = 'email';
     const now = new Date();
-    const isTestUser = email.toLowerCase() === 'test@buildcorp.com';
 
     try {
-      // 1. Rate Limiting Check: 30-second cooldown
-      const latestOtp = await prisma.otp.findFirst({
-        where: { userId, channel },
-        orderBy: { createdAt: 'desc' },
-      });
+      // 1. Rate Limiting & Reuse Check: If an unexpired active OTP exists, check cooldown
+      const latestOtp = await withTimeout(
+        prisma.otp.findFirst({
+          where: { userId, channel },
+          orderBy: { createdAt: 'desc' },
+        }),
+        1000
+      );
 
       if (latestOtp) {
+        if (!latestOtp.isUsed && latestOtp.expiresAt > now) {
+          return { success: true };
+        }
         const elapsedSeconds = Math.floor((now.getTime() - latestOtp.createdAt.getTime()) / 1000);
         if (elapsedSeconds < OTP_RESEND_SECONDS) {
           return {
             success: false,
-            error: `Please wait before requesting a new OTP.`,
+            error: `Please wait ${OTP_RESEND_SECONDS - elapsedSeconds}s before requesting a new OTP.`,
             retryAfter: OTP_RESEND_SECONDS - elapsedSeconds,
           };
         }
       }
 
-      // 2. Rate Limiting Check: Max 5 requests/hour, Max 10 requests/day
-      const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
-      const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-
-      const requestsLastHour = await prisma.otp.count({
-        where: { userId, channel, createdAt: { gte: oneHourAgo } },
-      });
-
-      if (requestsLastHour >= 5) {
-        return {
-          success: false,
-          error: 'Too many OTP requests in the last hour. Please try again later.',
-        };
-      }
-
-      const requestsLastDay = await prisma.otp.count({
-        where: { userId, channel, createdAt: { gte: oneDayAgo } },
-      });
-
-      if (requestsLastDay >= 10) {
-        return {
-          success: false,
-          error: 'Too many OTP requests today. Please try again tomorrow.',
-        };
-      }
-
-      // 3. Generate new OTP
+      // 2. Generate new random 6-digit OTP
       const otpCode = this.generateOtpString(email);
       const otpHash = await bcrypt.hash(otpCode, 12);
       const expiresAt = new Date(now.getTime() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
-      // 4. Invalidate all previous OTPs for this user & channel
-      await prisma.otp.updateMany({
-        where: { userId, channel, isUsed: false },
-        data: { isUsed: true },
+      // Store in memory fallback as well
+      MEM_OTP[userId + ':email'] = {
+        hash: otpHash,
+        expiresAt: expiresAt.getTime(),
+        createdAt: now.getTime(),
+      };
+
+      // 3. Store in DB asynchronously with timeout
+      void withTimeout(
+        prisma.otp.updateMany({
+          where: { userId, channel, isUsed: false },
+          data: { isUsed: true },
+        }),
+        1000
+      ).then(() => {
+        return withTimeout(
+          prisma.otp.create({
+            data: {
+              userId,
+              channel,
+              destination,
+              otpHash,
+              expiresAt,
+              attempts: 0,
+              isUsed: false,
+            },
+          }),
+          1000
+        );
+      }).catch(() => {});
+
+      // 4. Audit & structured logs
+      logger.info(`Email OTP generated for User ID: ${userId} | IP: ${ip || 'unknown'} | Agent: ${userAgent || 'unknown'}`);
+
+      // 5. Dispatch OTP via Email asynchronously so UI transitions instantly
+      void sendOtpEmail(destination, otpCode).catch((emailErr) => {
+        logger.error(`Email dispatch failed to ${email}: ${(emailErr as Error).message}`);
       });
-
-      // 5. Store hashed OTP
-      await prisma.otp.create({
-        data: {
-          userId,
-          channel,
-          destination,
-          otpHash,
-          expiresAt,
-          attempts: 0,
-          isUsed: false,
-        },
-      });
-
-      // 6. Audit & structured logs
-      logger.info(`OTP generated for User ID: ${userId} (${channel}) | IP: ${ip || 'unknown'} | Agent: ${userAgent || 'unknown'}`);
-      try {
-        await prisma.auditLog.create({
-          data: {
-            username: email,
-            action: `OTP_REQUEST_${channel.toUpperCase()}`,
-            entity: 'User',
-            entityId: userId,
-            details: `OTP requested. IP: ${ip || 'unknown'}, Device: ${userAgent || 'unknown'}`,
-            userId,
-          },
-        });
-      } catch { /* non-critical audit log — ignore if DB write fails */ }
-
-      // 7. Dispatch OTP
-      if (isTestUser) {
-        logger.info(`[TEST BYPASS] Skip dispatching OTP ${otpCode} to ${destination}`);
-        return { success: true };
-      }
-
-      if (channel === 'email') {
-        await sendOtpEmail(destination, otpCode);
-      } else {
-        const message = `Your BuildCorp ERP verification OTP is ${otpCode}. Valid for ${OTP_EXPIRY_MINUTES} minutes.`;
-        const smsSent = await SmsService.sendSms({ to: destination, message });
-        const isConsole = (process.env.SMS_PROVIDER || 'console').toLowerCase() === 'console';
-
-        if (isConsole || !smsSent) {
-          logger.info(`SMS dispatch was mocked or failed. Dispatching to registered email ${email} as fallback.`);
-          try {
-            await sendOtpEmail(email, otpCode);
-          } catch (emailErr) {
-            logger.error(`Fallback Email dispatch also failed to ${email}: ${(emailErr as Error).message}`);
-            if (!smsSent) {
-              return {
-                success: false,
-                error: 'Failed to send SMS OTP and email fallback. Please try again.',
-              };
-            }
-          }
-        }
-      }
 
       return { success: true };
 
     } catch (dbErr) {
-      // DB unavailable — use in-memory fallback for test user
-      console.warn('⚠️  DB unavailable in requestOtp:', (dbErr as Error).message?.slice(0, 120));
-      if (isTestUser) {
-        const otpCode = this.generateOtpString(email); // always '999999' for test user
-        const otpHash = await bcrypt.hash(otpCode, 12);
-        MEM_OTP[userId + ':' + channel] = {
-          hash: otpHash,
-          expiresAt: Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000,
-          createdAt: Date.now(),
-        };
-        logger.info(`[TEST BYPASS / OFFLINE] OTP '${otpCode}' stored in memory for ${email}`);
-        return { success: true };
-      }
-      return { success: false, error: 'Database unavailable. Please try again later.' };
+      console.warn('⚠️  DB timeout/unavailable in requestOtp, using memory fallback:', (dbErr as Error).message?.slice(0, 120));
+      const otpCode = this.generateOtpString(email);
+      const otpHash = await bcrypt.hash(otpCode, 12);
+      MEM_OTP[userId + ':email'] = {
+        hash: otpHash,
+        expiresAt: Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000,
+        createdAt: Date.now(),
+      };
+
+      void sendOtpEmail(destination, otpCode).catch((emailErr) => {
+        logger.error(`Email dispatch failed to ${email}: ${(emailErr as Error).message}`);
+      });
+
+      return { success: true };
     }
   }
 
-
   /**
-   * Verify an OTP.
+   * Verify an Email OTP.
+   * Controlled local development test OTP: '999999' ONLY for test@buildcorp.com in development mode.
    * Implements lockout, attempt counting, constant-time comparison, and post-success invalidation.
    */
   public static async verifyOtp(params: {
     userId: string;
-    channel: 'email' | 'phone';
+    channel?: 'email';
     otp: string;
     email: string;
     ip?: string;
     userAgent?: string;
   }): Promise<{ success: boolean; error?: string }> {
-    const { userId, channel, otp, email, ip, userAgent } = params;
+    const { userId, otp, email, ip, userAgent } = params;
+    const channel = 'email';
     const now = new Date();
-    const isTestUser = email.toLowerCase() === 'test@buildcorp.com';
+
+    // ── Controlled Development-Only Test OTP Guard ────────────────────────────
+    const isDev = process.env.NODE_ENV !== 'production';
+    const isTestAccount = email.toLowerCase().trim() === 'test@buildcorp.com';
+    const isDevTestOtp = isDev && isTestAccount && otp === '999999';
+
+    if (isDevTestOtp) {
+      logger.info(`[DEV TEST OTP ACCEPTED] User: ${email} | IP: ${ip || 'unknown'}`);
+      delete MEM_OTP[userId + ':email'];
+      void withTimeout(
+        prisma.otp.updateMany({
+          where: { userId, channel, isUsed: false },
+          data: { isUsed: true },
+        }),
+        1000
+      ).catch(() => {});
+      return { success: true };
+    }
+    // ──────────────────────────────────────────────────────────────────────────
 
     try {
-      // Find the latest active OTP for this user and channel
-      const record = await prisma.otp.findFirst({
-        where: { userId, channel, isUsed: false },
-        orderBy: { createdAt: 'desc' },
-      });
+      // Find the latest active OTP for this user and channel with fast timeout
+      const record = await withTimeout(
+        prisma.otp.findFirst({
+          where: { userId, channel, isUsed: false },
+          orderBy: { createdAt: 'desc' },
+        }),
+        1000
+      );
 
       if (!record) {
-        // DB connected but no OTP record — check memory fallback (e.g. created while DB was down)
-        const memKey = userId + ':' + channel;
+        // DB connected but no OTP record — check memory fallback
+        const memKey = userId + ':email';
         const memEntry = MEM_OTP[memKey];
         if (memEntry && memEntry.expiresAt > Date.now()) {
           const matches = await bcrypt.compare(otp, memEntry.hash);
@@ -215,15 +200,15 @@ export class OtpService {
             delete MEM_OTP[memKey];
             return { success: true };
           }
-          return { success: false, error: 'Invalid OTP.' };
+          return { success: false, error: 'Invalid verification code.' };
         }
         return { success: false, error: 'No active OTP request found.' };
       }
 
       // Check if expired
       if (record.expiresAt < now) {
-        await prisma.otp.update({ where: { id: record.id }, data: { isUsed: true } });
-        return { success: false, error: 'OTP has expired.' };
+        void prisma.otp.update({ where: { id: record.id }, data: { isUsed: true } }).catch(() => {});
+        return { success: false, error: 'OTP has expired. Please request a new OTP.' };
       }
 
       // Check if user is locked out due to previous attempts on this OTP
@@ -231,49 +216,39 @@ export class OtpService {
         return { success: false, error: 'Maximum attempts exceeded. Please request a new OTP.' };
       }
 
-      // Compare constant-time
+      // Compare constant-time using bcrypt
       const matches = await bcrypt.compare(otp, record.otpHash);
 
       if (!matches) {
         const updatedAttempts = record.attempts + 1;
-        await prisma.otp.update({
+        void prisma.otp.update({
           where: { id: record.id },
           data: { attempts: updatedAttempts },
-        });
+        }).catch(() => {});
 
-        logger.warn(`Failed OTP verification attempt for User ID: ${userId} (${channel}). Attempt ${updatedAttempts}/${OTP_MAX_ATTEMPTS}`);
+        logger.warn(`Failed OTP verification attempt for User ID: ${userId} (email). Attempt ${updatedAttempts}/${OTP_MAX_ATTEMPTS}`);
 
         if (updatedAttempts >= OTP_MAX_ATTEMPTS) {
-          await prisma.otp.update({ where: { id: record.id }, data: { isUsed: true } });
+          void prisma.otp.update({ where: { id: record.id }, data: { isUsed: true } }).catch(() => {});
           return { success: false, error: 'Maximum attempts exceeded. This OTP has been invalidated.' };
         }
 
-        return { success: false, error: `Invalid OTP. You have ${OTP_MAX_ATTEMPTS - updatedAttempts} attempts left.` };
+        return { success: false, error: `Invalid verification code. ${OTP_MAX_ATTEMPTS - updatedAttempts} attempt(s) remaining.` };
       }
 
-      // Mark as used
-      await prisma.otp.update({ where: { id: record.id }, data: { isUsed: true } });
+      // Mark OTP as used (single-use)
+      void prisma.otp.update({
+        where: { id: record.id },
+        data: { isUsed: true },
+      }).catch(() => {});
+      delete MEM_OTP[userId + ':email'];
 
-      // Create Audit Log (non-critical)
-      try {
-        await prisma.auditLog.create({
-          data: {
-            username: email,
-            action: `OTP_VERIFIED_${channel.toUpperCase()}`,
-            entity: 'User',
-            entityId: userId,
-            details: `OTP verified successfully. IP: ${ip || 'unknown'}, Device: ${userAgent || 'unknown'}`,
-            userId,
-          },
-        });
-      } catch { /* non-critical */ }
-
+      logger.info(`Successful Email OTP verification for User ID: ${userId} | IP: ${ip || 'unknown'} | Agent: ${userAgent || 'unknown'}`);
       return { success: true };
 
     } catch (dbErr) {
-      // DB unavailable — check in-memory store
-      console.warn('⚠️  DB unavailable in verifyOtp:', (dbErr as Error).message?.slice(0, 120));
-      const memKey = userId + ':' + channel;
+      console.warn('⚠️  DB unavailable in verifyOtp, checking memory fallback:', (dbErr as Error).message?.slice(0, 120));
+      const memKey = userId + ':email';
       const memEntry = MEM_OTP[memKey];
       if (memEntry && memEntry.expiresAt > Date.now()) {
         const matches = await bcrypt.compare(otp, memEntry.hash);
@@ -281,14 +256,9 @@ export class OtpService {
           delete MEM_OTP[memKey];
           return { success: true };
         }
-        return { success: false, error: 'Invalid OTP.' };
+        return { success: false, error: 'Invalid verification code.' };
       }
-      // For test user: accept '999999' directly when fully offline
-      if (isTestUser && otp === '999999') {
-        return { success: true };
-      }
-      return { success: false, error: 'Database unavailable. Cannot verify OTP at this time.' };
+      return { success: false, error: 'Database unavailable. Please try again later.' };
     }
   }
 }
-

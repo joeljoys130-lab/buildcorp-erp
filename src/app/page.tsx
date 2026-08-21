@@ -1,35 +1,30 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { verifyAccessToken } from '@/lib/auth/jwt';
-import {
-  getEntriesAction,
-  getCementLoadsAction,
-  getTarLoadsAction,
-  getStockRegisterAction,
-  getSiteMaterialsAction,
-  getWorkBasedEntriesAction,
-  getPrivateWorksAction,
-} from './actions';
+import { getTenantContextFromToken } from '@/lib/auth/tenant';
+import { dbService } from '@/lib/db-service';
 import DashboardPortal from '@/components/dashboard-portal';
 
 export default async function Page() {
-  // ── Auth guard ──────────────────────────────────────────────────
+  // ── Auth guard & stateless tenant context resolution ─────────────────────
   const cookieStore = await cookies();
   const token = cookieStore.get('auth_token')?.value;
-  if (!token || !verifyAccessToken(token)) {
+  if (!token) {
     redirect('/login');
   }
 
-  // Decode user from JWT (no DB needed for basic info)
-  const decoded = verifyAccessToken(token) as any;
+  const ctx = await getTenantContextFromToken(token);
+  if (!ctx) {
+    redirect('/login');
+  }
+
   const user = {
-    id:    decoded.id    ?? 'u-1',
-    email: decoded.email ?? 'user@buildcorp.com',
-    role:  decoded.role  ?? 'ADMIN',
-    name:  decoded.name  ?? decoded.email?.split('@')[0] ?? 'User',
+    id: ctx.userId,
+    email: ctx.email,
+    name: ctx.name,
+    role: ctx.role,
   };
 
-  // ── Fetch initial data ──────────────────────────────────────────
+  // ── Parallel read of initial ERP data directly bound to authenticated email ─
   const [
     entries,
     cementLoads,
@@ -39,13 +34,13 @@ export default async function Page() {
     workBasedEntries,
     privateWorks,
   ] = await Promise.all([
-    getEntriesAction(),
-    getCementLoadsAction(),
-    getTarLoadsAction(),
-    getStockRegisterAction(),
-    getSiteMaterialsAction(),
-    getWorkBasedEntriesAction(),
-    getPrivateWorksAction(),
+    dbService.getEntries(ctx.email),
+    dbService.getCementLoads(ctx.email),
+    dbService.getTarLoads(ctx.email),
+    dbService.getStockRegister(ctx.email),
+    dbService.getSiteMaterials(ctx.email),
+    dbService.getWorkBasedEntries(ctx.email),
+    dbService.getPrivateWorks(ctx.email),
   ]);
 
   const initialData = {

@@ -1,13 +1,10 @@
 import LoginView from '@/components/login-view';
-import { useRouter } from 'next/router';
 
 export default function LoginPage() {
-  const router = useRouter();
-  const handleSuccess = (user: any) => {
-    // Redirect directly to the dashboard root and replace history
-    router.replace('/');
+  const handleSuccess = (_user: any) => {
+    // Perform a clean location navigation to / so auth_token cookie & server state refresh cleanly
+    window.location.href = '/';
   };
 
   return <LoginView onLoginSuccess={handleSuccess} />;
 }
-
