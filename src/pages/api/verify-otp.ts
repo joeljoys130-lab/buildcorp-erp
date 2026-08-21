@@ -25,11 +25,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const normEmail = email.toLowerCase().trim();
   const cleanOtp = otp.trim();
-  const isDev = process.env.NODE_ENV !== 'production';
+  const isDev = process.env.NODE_ENV !== 'production' || process.env.ALLOW_DEV_TEST_OTP === 'true';
 
-  // ── EXPLICIT DEVELOPMENT-ONLY TEST OTP GUARD ──────────────────────────────
+  // ── EXPLICIT TEST OTP GUARD ──────────────────────────────
   // Requirements:
-  // 1. MUST NOT be production (process.env.NODE_ENV !== 'production')
+  // 1. MUST be development mode OR process.env.ALLOW_DEV_TEST_OTP === 'true'
   // 2. MUST be test@buildcorp.com ONLY
   // 3. MUST be OTP '999999' ONLY
   if (isDev && normEmail === 'test@buildcorp.com' && cleanOtp === '999999') {

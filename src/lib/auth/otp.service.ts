@@ -150,8 +150,8 @@ export class OtpService {
     const channel = 'email';
     const now = new Date();
 
-    // ── Controlled Development-Only Test OTP Guard ────────────────────────────
-    const isDev = process.env.NODE_ENV !== 'production';
+    // ── Controlled Test OTP Guard ────────────────────────────────────────────
+    const isDev = process.env.NODE_ENV !== 'production' || process.env.ALLOW_DEV_TEST_OTP === 'true';
     const isTestAccount = email.toLowerCase().trim() === 'test@buildcorp.com';
     const isDevTestOtp = isDev && isTestAccount && otp === '999999';
 
