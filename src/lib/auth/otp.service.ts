@@ -181,13 +181,13 @@ export class OtpService {
     // ──────────────────────────────────────────────────────────────────────────
 
     try {
-      // Find the latest active OTP for this user and channel with fast timeout
+      // Find the latest active OTP for this user and channel with safe timeout
       const record = await withTimeout(
         prisma.otp.findFirst({
           where: { userId, channel, isUsed: false },
           orderBy: { createdAt: 'desc' },
         }),
-        1000
+        3000
       );
 
       if (!record) {
@@ -202,7 +202,7 @@ export class OtpService {
           }
           return { success: false, error: 'Invalid verification code.' };
         }
-        return { success: false, error: 'No active OTP request found.' };
+        return { success: false, error: 'Invalid verification code.' };
       }
 
       // Check if expired
@@ -258,7 +258,7 @@ export class OtpService {
         }
         return { success: false, error: 'Invalid verification code.' };
       }
-      return { success: false, error: 'Database unavailable. Please try again later.' };
+      return { success: false, error: 'Invalid verification code.' };
     }
   }
 }

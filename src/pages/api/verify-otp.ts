@@ -1,7 +1,7 @@
 // src/pages/api/verify-otp.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { generateAccessToken } from '@/lib/auth/jwt';
-import { findUserByEmail, findUser } from '@/lib/auth/users';
+import { findUserByEmail, findUser, REGISTERED_USERS } from '@/lib/auth/users';
 import { OtpService } from '@/lib/auth/otp.service';
 
 /**
@@ -24,6 +24,43 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   const normEmail = email.toLowerCase().trim();
+  const cleanOtp = otp.trim();
+  const isDev = process.env.NODE_ENV !== 'production';
+
+  // ── EXPLICIT DEVELOPMENT-ONLY TEST OTP GUARD ──────────────────────────────
+  // Requirements:
+  // 1. MUST NOT be production (process.env.NODE_ENV !== 'production')
+  // 2. MUST be test@buildcorp.com ONLY
+  // 3. MUST be OTP '999999' ONLY
+  if (isDev && normEmail === 'test@buildcorp.com' && cleanOtp === '999999') {
+    const user = REGISTERED_USERS['test@buildcorp.com'] || (await findUserByEmail(normEmail));
+    if (user) {
+      const token = generateAccessToken({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        organizationId: (user as any).organizationId || 'org-default',
+      });
+
+      res.setHeader(
+        'Set-Cookie',
+        `auth_token=${token}; HttpOnly; Path=/; Max-Age=3600; SameSite=Lax`,
+      );
+
+      return res.status(200).json({
+        success: true,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+        },
+      });
+    }
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+
   const user = (await findUserByEmail(normEmail)) || (await findUser(normEmail));
   if (!user) {
     return res.status(403).json({ success: false, error: 'User not registered' });
@@ -34,7 +71,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const result = await OtpService.verifyOtp({
     userId: user.id,
-    otp: otp.trim(),
+    otp: cleanOtp,
     email: user.email,
     ip,
     userAgent,
