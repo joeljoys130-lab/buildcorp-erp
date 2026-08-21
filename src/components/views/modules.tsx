@@ -843,6 +843,7 @@ export function EntryView({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [selectedEntry, setSelectedEntry] = useState<Entry | null>(null);
+  const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
   const [form, setForm] = useState<EntryFormState>(ENTRY_FORM_EMPTY);
   const setField = <K extends keyof EntryFormState>(key: K, value: EntryFormState[K]) =>
     setForm(prev => ({ ...prev, [key]: value }));
@@ -1265,38 +1266,199 @@ export function EntryView({
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-100">
-              {displayedEntries.map(e => (
-                <tr key={e.id} className="hover:bg-neutral-55">
-                  <td className="p-3">
-                    <button 
-                      onClick={() => setSelectedEntry(e)}
-                      className="font-bold text-black hover:underline text-left cursor-pointer focus:outline-none bg-transparent border-none p-0"
+              {displayedEntries.map(e => {
+                const isExpanded = expandedEntryId === e.id;
+                return (
+                  <React.Fragment key={e.id}>
+                    <tr 
+                      tabIndex={0}
+                      aria-expanded={isExpanded}
+                      onClick={() => setExpandedEntryId(prev => (prev === e.id ? null : e.id))}
+                      onKeyDown={(evt) => {
+                        if (evt.key === 'Enter' || evt.key === ' ') {
+                          evt.preventDefault();
+                          setExpandedEntryId(prev => (prev === e.id ? null : e.id));
+                        }
+                      }}
+                      className={`hover:bg-neutral-50 cursor-pointer transition-colors ${isExpanded ? "bg-neutral-50/80 font-medium" : ""}`}
                     >
-                      {e.workName}
-                    </button>
-                  </td>
-                  <td className="p-3 text-neutral-600">{e.nameOfOffice}</td>
-                  <td className="p-3 text-right font-mono font-bold text-black">₹{e.amount.toLocaleString()}</td>
-                  <td className="p-3 font-mono text-black">{e.agreementNo || "Pending"}</td>
-                  <td className="p-3 font-mono text-black">{formatDate(e.siteHandoverDate)}</td>
-                  <td className="p-3 font-mono text-black">{formatDate(e.workCompletionDateAsPerAgreement)}</td>
-                  <td className="p-3 text-center">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${e.loaReceived ? 'border-black bg-black text-white' : 'border-neutral-300 bg-white text-neutral-500'}`}>
-                      {e.loaReceived ? "YES" : "NO"}
-                    </span>
-                  </td>
-                  <td className="p-3 text-right">
-                    <div className="flex gap-2 justify-end">
-                      <button onClick={() => handleEdit(e)} className="px-2 py-1 border border-neutral-300 rounded text-[10px] font-bold text-black hover:bg-neutral-100 cursor-pointer">
-                        Edit
-                      </button>
-                      <button onClick={() => handleDelete(e.id)} className="px-2 py-1 border border-neutral-300 rounded text-[10px] font-bold text-black hover:bg-neutral-100 cursor-pointer">
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                      <td className="p-3">
+                        <span className="font-bold text-black hover:underline text-left cursor-pointer">
+                          {e.workName}
+                        </span>
+                      </td>
+                      <td className="p-3 text-neutral-600">{e.nameOfOffice}</td>
+                      <td className="p-3 text-right font-mono font-bold text-black">₹{e.amount.toLocaleString()}</td>
+                      <td className="p-3 font-mono text-black">{e.agreementNo || "Pending"}</td>
+                      <td className="p-3 font-mono text-black">{formatDate(e.siteHandoverDate)}</td>
+                      <td className="p-3 font-mono text-black">{formatDate(e.workCompletionDateAsPerAgreement)}</td>
+                      <td className="p-3 text-center">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${e.loaReceived ? 'border-black bg-black text-white' : 'border-neutral-300 bg-white text-neutral-500'}`}>
+                          {e.loaReceived ? "YES" : "NO"}
+                        </span>
+                      </td>
+                      <td className="p-3 text-right">
+                        <div className="flex gap-2 justify-end" onClick={(evt) => evt.stopPropagation()}>
+                          <button 
+                            type="button"
+                            onClick={(evt) => {
+                              evt.stopPropagation();
+                              handleEdit(e);
+                            }} 
+                            className="px-2 py-1 border border-neutral-300 rounded text-[10px] font-bold text-black hover:bg-neutral-100 cursor-pointer bg-white"
+                          >
+                            Edit
+                          </button>
+                          <button 
+                            type="button"
+                            onClick={(evt) => {
+                              evt.stopPropagation();
+                              handleDelete(e.id);
+                            }} 
+                            className="px-2 py-1 border border-neutral-300 rounded text-[10px] font-bold text-black hover:bg-neutral-100 cursor-pointer bg-white"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr className="bg-neutral-50 border-b border-neutral-200">
+                        <td colSpan={8} className="p-4">
+                          <div className="border border-neutral-300 bg-white p-5 rounded-lg space-y-5 shadow-sm text-xs text-black">
+                            <div className="flex items-center justify-between border-b border-neutral-200 pb-2">
+                              <h4 className="font-bold uppercase tracking-wider text-[11px] text-black flex items-center gap-2">
+                                <FileText className="w-4 h-4 text-neutral-600" />
+                                Complete Contract Entry Details
+                              </h4>
+                              <span className="font-mono text-[10px] text-neutral-400">Record ID: {e.id}</span>
+                            </div>
+
+                            {/* Project Overview */}
+                            <div>
+                              <h5 className="text-[10px] font-bold uppercase tracking-wider text-black border-b border-neutral-100 pb-1 mb-3">Project Overview</h5>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Work Name</span>
+                                  <span className="font-bold text-black whitespace-pre-wrap overflow-wrap-anywhere">{e.workName}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Office / Authority</span>
+                                  <span className="font-semibold text-black">{e.nameOfOffice || "—"}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Amount (Without GST)</span>
+                                  <span className="font-mono font-bold text-black text-sm">₹{e.amount.toLocaleString()}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">GST Applicable</span>
+                                  <span className="font-semibold text-black">{e.gstApplicable ? "Yes (18%)" : "No / Exempt"}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Total Amount (Inc. GST)</span>
+                                  <span className="font-mono font-bold text-black text-sm">₹{(e.amount * (e.gstApplicable ? 1.18 : 1)).toLocaleString()}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">MLA / MP Sponsor</span>
+                                  <span className="font-semibold text-black">{e.mlaMpName || "—"}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">LOA Status</span>
+                                  <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold border mt-0.5 ${e.loaReceived ? 'border-black bg-black text-white' : 'border-neutral-300 bg-white text-neutral-500'}`}>
+                                    {e.loaReceived ? "RECEIVED" : "PENDING"}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Agreement & Financial Securities */}
+                            <div>
+                              <h5 className="text-[10px] font-bold uppercase tracking-wider text-black border-b border-neutral-100 pb-1 mb-3">Agreement & Security Details</h5>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Agreement Number</span>
+                                  <span className="font-mono font-semibold text-black">{e.agreementNo || "Pending"}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Stamp Paper Value</span>
+                                  <span className="font-mono font-semibold text-black">₹{(e.amountOfStampPaperRequired || 0).toLocaleString()}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Security Deposit</span>
+                                  <span className="font-mono font-semibold text-black">₹{(e.securityAmount || 0).toLocaleString()}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Performance Guarantee</span>
+                                  <span className="font-mono font-semibold text-black">₹{(e.performanceGuarantee || 0).toLocaleString()}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">DLP Period</span>
+                                  <span className="font-semibold text-black">{e.dlpPeriodAsPerInLOA || "—"}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Current Status</span>
+                                  <span className="font-semibold text-black">{e.status || "Not Started"}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Timelines */}
+                            <div>
+                              <h5 className="text-[10px] font-bold uppercase tracking-wider text-black border-b border-neutral-100 pb-1 mb-3">Execution Timelines</h5>
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Last Date to Execute Agreement</span>
+                                  <span className="font-mono font-semibold text-black">{formatDate(e.lastDateToExecuteAgreement)}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Site Handover Date</span>
+                                  <span className="font-mono font-semibold text-black">{formatDate(e.siteHandoverDate)}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Contract Completion Date</span>
+                                  <span className="font-mono font-semibold text-black">{formatDate(e.workCompletionDateAsPerAgreement)}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Department Contacts */}
+                            <div>
+                              <h5 className="text-[10px] font-bold uppercase tracking-wider text-black border-b border-neutral-100 pb-1 mb-3">Department Contacts</h5>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                                <div className="border border-neutral-100 p-2.5 rounded bg-neutral-50">
+                                  <div className="font-semibold text-black text-[10px] uppercase mb-1">Ward Member</div>
+                                  <div>Name: <span className="font-semibold text-black">{e.wardMemberName || "—"}</span></div>
+                                  <div>Phone: <span className="font-semibold text-black">{e.wardMemberPhone || "—"}</span></div>
+                                </div>
+                                <div className="border border-neutral-100 p-2.5 rounded bg-neutral-50">
+                                  <div className="font-semibold text-black text-[10px] uppercase mb-1">Overseer</div>
+                                  <div>Name: <span className="font-semibold text-black">{e.overseerName || "—"}</span></div>
+                                  <div>Phone: <span className="font-semibold text-black">{e.overseerPhone || "—"}</span></div>
+                                </div>
+                                <div className="border border-neutral-100 p-2.5 rounded bg-neutral-50">
+                                  <div className="font-semibold text-black text-[10px] uppercase mb-1">Executive Engineer (EE)</div>
+                                  <div>Name: <span className="font-semibold text-black">{e.executiveEngineerName || "—"}</span></div>
+                                  <div>Phone: <span className="font-semibold text-black">{e.executiveEngineerPhone || "—"}</span></div>
+                                </div>
+                                <div className="border border-neutral-100 p-2.5 rounded bg-neutral-50">
+                                  <div className="font-semibold text-black text-[10px] uppercase mb-1">Assistant Engineer (AE)</div>
+                                  <div>Name: <span className="font-semibold text-black">{e.assistantEngineerName || "—"}</span></div>
+                                  <div>Phone: <span className="font-semibold text-black">{e.assistantEngineerPhone || "—"}</span></div>
+                                </div>
+                                <div className="border border-neutral-100 p-2.5 rounded bg-neutral-50 sm:col-span-2 md:col-span-1">
+                                  <div className="font-semibold text-black text-[10px] uppercase mb-1">Block Engineer</div>
+                                  <div>Name: <span className="font-semibold text-black">{e.blockEngineerName || "—"}</span></div>
+                                  <div>Phone: <span className="font-semibold text-black">{e.blockEngineerPhone || "—"}</span></div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
               {filteredEntries.length === 0 && (
                 <tr>
                   <td colSpan={8} className="p-6 text-center text-neutral-400">No project entries logged.</td>
@@ -2381,6 +2543,7 @@ export function PrivateWorkView({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [selectedPrivateWork, setSelectedPrivateWork] = useState<PrivateWork | null>(null);
+  const [expandedPrivateWorkId, setExpandedPrivateWorkId] = useState<string | null>(null);
 
   const [form, setForm] = useState<PrivateWorkFormState>(PRIVATE_WORK_FORM_EMPTY);
   const setField = <K extends keyof PrivateWorkFormState>(key: K, value: PrivateWorkFormState[K]) =>
@@ -2664,35 +2827,144 @@ export function PrivateWorkView({
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-100">
-              {filtered.map(w => (
-                <tr key={w.id} className="hover:bg-neutral-50/50">
-                  <td className="p-3 font-bold">
-                    <button 
-                      onClick={() => setSelectedPrivateWork(w)}
-                      className="font-bold text-black hover:underline text-left cursor-pointer focus:outline-none bg-transparent border-none p-0"
+              {filtered.map(w => {
+                const isExpanded = expandedPrivateWorkId === w.id;
+                return (
+                  <React.Fragment key={w.id}>
+                    <tr 
+                      tabIndex={0}
+                      aria-expanded={isExpanded}
+                      onClick={() => setExpandedPrivateWorkId(prev => (prev === w.id ? null : w.id))}
+                      onKeyDown={(evt) => {
+                        if (evt.key === 'Enter' || evt.key === ' ') {
+                          evt.preventDefault();
+                          setExpandedPrivateWorkId(prev => (prev === w.id ? null : w.id));
+                        }
+                      }}
+                      className={`hover:bg-neutral-50 cursor-pointer transition-colors ${isExpanded ? "bg-neutral-50/80 font-medium" : ""}`}
                     >
-                      {w.workName}
-                    </button>
-                  </td>
-                  <td className="p-3">{w.location}</td>
-                  <td className="p-3">{w.roadWorkNature}</td>
-                  <td className="p-3 text-right font-mono">₹{w.approxAmount.toLocaleString()}</td>
-                  <td className="p-3 text-right font-mono font-bold">₹{w.approxFinalWorkAmount.toLocaleString()}</td>
-                  <td className="p-3 text-right font-mono text-neutral-600">₹{w.paymentReceived.toLocaleString()}</td>
-                  <td className="p-3 text-right font-mono font-bold">₹{w.paymentBalance.toLocaleString()}</td>
-                  <td className="p-3 text-right font-mono">{formatDate(w.completedDate)}</td>
-                  <td className="p-3 text-right">
-                    <div className="flex gap-2 justify-end">
-                      <button onClick={() => handleEdit(w)} className="p-1 hover:bg-neutral-100 rounded text-neutral-600">
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button onClick={() => handleDelete(w.id)} className="p-1 hover:bg-neutral-150 rounded text-neutral-600">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                      <td className="p-3 font-bold">
+                        <span className="font-bold text-black hover:underline text-left cursor-pointer">
+                          {w.workName}
+                        </span>
+                      </td>
+                      <td className="p-3">{w.location}</td>
+                      <td className="p-3">{w.roadWorkNature}</td>
+                      <td className="p-3 text-right font-mono">₹{w.approxAmount.toLocaleString()}</td>
+                      <td className="p-3 text-right font-mono font-bold">₹{w.approxFinalWorkAmount.toLocaleString()}</td>
+                      <td className="p-3 text-right font-mono text-neutral-600">₹{w.paymentReceived.toLocaleString()}</td>
+                      <td className="p-3 text-right font-mono font-bold">₹{w.paymentBalance.toLocaleString()}</td>
+                      <td className="p-3 text-right font-mono">{formatDate(w.completedDate)}</td>
+                      <td className="p-3 text-right">
+                        <div className="flex gap-2 justify-end" onClick={(evt) => evt.stopPropagation()}>
+                          <button 
+                            type="button"
+                            onClick={(evt) => {
+                              evt.stopPropagation();
+                              handleEdit(w);
+                            }} 
+                            className="p-1 hover:bg-neutral-100 rounded text-neutral-600 cursor-pointer bg-white border border-neutral-200"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button 
+                            type="button"
+                            onClick={(evt) => {
+                              evt.stopPropagation();
+                              handleDelete(w.id);
+                            }} 
+                            className="p-1 hover:bg-neutral-150 rounded text-neutral-600 cursor-pointer bg-white border border-neutral-200"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr className="bg-neutral-50 border-b border-neutral-200">
+                        <td colSpan={9} className="p-4">
+                          <div className="border border-neutral-300 bg-white p-5 rounded-lg space-y-5 shadow-sm text-xs text-black">
+                            <div className="flex items-center justify-between border-b border-neutral-200 pb-2">
+                              <h4 className="font-bold uppercase tracking-wider text-[11px] text-black flex items-center gap-2">
+                                <FileText className="w-4 h-4 text-neutral-600" />
+                                Complete Private Work Details
+                              </h4>
+                              <span className="font-mono text-[10px] text-neutral-400">Record ID: {w.id}</span>
+                            </div>
+
+                            {/* Work Overview */}
+                            <div>
+                              <h5 className="text-[10px] font-bold uppercase tracking-wider text-black border-b border-neutral-100 pb-1 mb-3">Work Overview</h5>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Work Name</span>
+                                  <span className="font-bold text-black whitespace-pre-wrap overflow-wrap-anywhere">{w.workName}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Location</span>
+                                  <span className="font-semibold text-black">{w.location || "—"}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Nature of Work</span>
+                                  <span className="font-semibold text-black">{w.roadWorkNature || "—"}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Related Government Contract</span>
+                                  <span className="font-semibold text-black">{w.relatedToContractWork || "None"}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Site Visit Date</span>
+                                  <span className="font-mono font-semibold text-black">{formatDate(w.siteVisitDate)}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Completion Target</span>
+                                  <span className="font-mono font-semibold text-black">{formatDate(w.completedDate)}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Financial Summary */}
+                            <div>
+                              <h5 className="text-[10px] font-bold uppercase tracking-wider text-black border-b border-neutral-100 pb-1 mb-3">Financial Summary</h5>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Approximate Amount</span>
+                                  <span className="font-mono font-semibold text-black">₹{w.approxAmount.toLocaleString()}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Advance Payment Received</span>
+                                  <span className="font-mono font-semibold text-black">₹{w.advanceReceived.toLocaleString()}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Approx Final Work Amount</span>
+                                  <span className="font-mono font-bold text-black text-sm">₹{w.approxFinalWorkAmount.toLocaleString()}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Total Payment Received</span>
+                                  <span className="font-mono font-semibold text-neutral-700">₹{w.paymentReceived.toLocaleString()}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Outstanding Balance</span>
+                                  <span className="font-mono font-bold text-black">₹{w.paymentBalance.toLocaleString()}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {w.remarks && (
+                              <div className="border-t border-neutral-100 pt-3">
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400 mb-1">Remarks & Notes</span>
+                                <p className="text-neutral-700 whitespace-pre-wrap overflow-wrap-anywhere bg-neutral-50 p-2.5 rounded border border-neutral-200">
+                                  {w.remarks}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
               {filtered.length === 0 && (
                 <tr>
                   <td colSpan={9} className="p-6 text-center text-neutral-400">No private works logged.</td>
@@ -2846,6 +3118,7 @@ export function TarLoadView({
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [expandedTarLoadId, setExpandedTarLoadId] = useState<string | null>(null);
 
   const [form, setForm] = useState<TarLoadFormState>(TAR_LOAD_FORM_EMPTY);
   const setField = <K extends keyof TarLoadFormState>(key: K, value: TarLoadFormState[K]) =>
@@ -3163,28 +3436,125 @@ export function TarLoadView({
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-100">
-              {filtered.map(load => (
-                <tr key={load.id} className="hover:bg-neutral-50/50">
-                  <td className="p-3 font-mono">{formatDate(load.purchasedDate)}</td>
-                  <td className="p-3 font-bold">{load.purchasedFrom}</td>
-                  <td className="p-3"><span className="border border-neutral-300 px-1 py-0.5 rounded font-bold font-mono">{load.item}</span></td>
-                  <td className="p-3 text-right font-mono">{load.quantityInKg.toLocaleString()} KG</td>
-                  <td className="p-3 text-right font-mono">{load.loadInNoOfPack} Packs</td>
-                  <td className="p-3 text-right font-mono font-bold">₹{(load.amountPerLoad || 0).toLocaleString()}</td>
-                  <td className="p-3 text-right font-mono text-neutral-600">₹{load.paidAmount.toLocaleString()}</td>
-                  <td className="p-3 text-right font-mono font-bold">₹{((load.amountPerLoad || 0) - load.paidAmount).toLocaleString()}</td>
-                  <td className="p-3 text-right">
-                    <div className="flex gap-2 justify-end">
-                      <button onClick={() => handleEdit(load)} className="p-1 hover:bg-neutral-100 rounded text-neutral-600">
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button onClick={() => handleDelete(load.id)} className="p-1 hover:bg-neutral-150 rounded text-neutral-600">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {filtered.map(load => {
+                const isExpanded = expandedTarLoadId === load.id;
+                return (
+                  <React.Fragment key={load.id}>
+                    <tr 
+                      tabIndex={0}
+                      aria-expanded={isExpanded}
+                      onClick={() => setExpandedTarLoadId(prev => (prev === load.id ? null : load.id))}
+                      onKeyDown={(evt) => {
+                        if (evt.key === 'Enter' || evt.key === ' ') {
+                          evt.preventDefault();
+                          setExpandedTarLoadId(prev => (prev === load.id ? null : load.id));
+                        }
+                      }}
+                      className={`hover:bg-neutral-50 cursor-pointer transition-colors ${isExpanded ? "bg-neutral-50/80 font-medium" : ""}`}
+                    >
+                      <td className="p-3 font-mono">{formatDate(load.purchasedDate)}</td>
+                      <td className="p-3 font-bold">{load.purchasedFrom}</td>
+                      <td className="p-3"><span className="border border-neutral-300 px-1 py-0.5 rounded font-bold font-mono">{load.item}</span></td>
+                      <td className="p-3 text-right font-mono">{load.quantityInKg.toLocaleString()} KG</td>
+                      <td className="p-3 text-right font-mono">{load.loadInNoOfPack} Packs</td>
+                      <td className="p-3 text-right font-mono font-bold">₹{(load.amountPerLoad || 0).toLocaleString()}</td>
+                      <td className="p-3 text-right font-mono text-neutral-600">₹{load.paidAmount.toLocaleString()}</td>
+                      <td className="p-3 text-right font-mono font-bold">₹{((load.amountPerLoad || 0) - load.paidAmount).toLocaleString()}</td>
+                      <td className="p-3 text-right">
+                        <div className="flex gap-2 justify-end" onClick={(evt) => evt.stopPropagation()}>
+                          <button 
+                            type="button"
+                            onClick={(evt) => {
+                              evt.stopPropagation();
+                              handleEdit(load);
+                            }} 
+                            className="p-1 hover:bg-neutral-100 rounded text-neutral-600 cursor-pointer bg-white border border-neutral-200"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button 
+                            type="button"
+                            onClick={(evt) => {
+                              evt.stopPropagation();
+                              handleDelete(load.id);
+                            }} 
+                            className="p-1 hover:bg-neutral-150 rounded text-neutral-600 cursor-pointer bg-white border border-neutral-200"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr className="bg-neutral-50 border-b border-neutral-200">
+                        <td colSpan={9} className="p-4">
+                          <div className="border border-neutral-300 bg-white p-5 rounded-lg space-y-4 shadow-sm text-xs text-black">
+                            <div className="flex items-center justify-between border-b border-neutral-200 pb-2">
+                              <h4 className="font-bold uppercase tracking-wider text-[11px] text-black flex items-center gap-2">
+                                <FileText className="w-4 h-4 text-neutral-600" />
+                                Complete Tar Load Specification Details
+                              </h4>
+                              <span className="font-mono text-[10px] text-neutral-400">Record ID: {load.id}</span>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Purchased Date</span>
+                                <span className="font-mono text-black font-semibold">{formatDate(load.purchasedDate)}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Purchased From (Party)</span>
+                                <span className="text-black font-semibold">{load.purchasedFrom || "—"}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Tar Emulsion / Item</span>
+                                <span className="font-mono font-bold text-black">{load.item || "—"}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Quantity In KG</span>
+                                <span className="font-mono text-black font-semibold">{load.quantityInKg.toLocaleString()} KG</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Load In Packs</span>
+                                <span className="font-mono text-black font-semibold">{load.loadInNoOfPack} Packs</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Addressed Office</span>
+                                <span className="text-black font-semibold">{load.addressedOffice || "—"}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Amount Per Load</span>
+                                <span className="font-mono font-bold text-black">₹{(load.amountPerLoad || 0).toLocaleString()}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Paid Amount</span>
+                                <span className="font-mono font-semibold text-neutral-700">₹{(load.paidAmount || 0).toLocaleString()}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Balance To Be Paid</span>
+                                <span className="font-mono font-bold text-black">₹{((load.amountPerLoad || 0) - load.paidAmount).toLocaleString()}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400">Billing Name / Buyer</span>
+                                <span className="text-black font-semibold">{load.billingNameBuyer || "—"}</span>
+                              </div>
+                            </div>
+
+                            {load.remarks && (
+                              <div className="border-t border-neutral-100 pt-3">
+                                <span className="block text-[10px] font-bold uppercase text-neutral-400 mb-1">Remarks & Notes</span>
+                                <p className="text-neutral-700 whitespace-pre-wrap overflow-wrap-anywhere bg-neutral-50 p-2.5 rounded border border-neutral-200">
+                                  {load.remarks}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
               {filtered.length === 0 && (
                 <tr>
                   <td colSpan={9} className="p-6 text-center text-neutral-400">No tar load records logged.</td>
@@ -3229,6 +3599,7 @@ export function WorkBasedEntryView({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [expandedBoqId, setExpandedBoqId] = useState<string | null>(null);
   const [pendingWorkBasedEntries, setPendingWorkBasedEntries] = useState<WorkBasedEntry[]>([]);
 
   const handleWorkSearch = (query: string) => {
@@ -3509,28 +3880,100 @@ export function WorkBasedEntryView({
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-100">
-                {filteredItems.map(item => (
-                  <tr key={item.id} className="hover:bg-neutral-50/50">
-                    <td className="p-3 font-mono font-bold">{item.itemSlNo}</td>
-                    <td className="p-3 font-semibold">{item.itemName}</td>
-                    <td className="p-3 text-right font-mono">{item.itemQuantity.toLocaleString()}</td>
-                    <td className="p-3"><span className="bg-neutral-100 px-1 py-0.5 rounded font-bold font-mono">{item.itemUnit}</span></td>
-                    <td className="p-3 text-right font-mono">₹{item.itemRateAsPerEstimate.toLocaleString()}</td>
-                    <td className="p-3 text-right font-mono font-bold text-black border-l border-neutral-50">
-                      ₹{item.totalAmountPerItem.toLocaleString()}
-                    </td>
-                    <td className="p-3 text-right">
-                      <div className="flex gap-2 justify-end">
-                        <button onClick={() => handleEdit(item)} className="p-1 hover:bg-neutral-100 rounded text-neutral-600">
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button onClick={() => handleDelete(item.id)} className="p-1 hover:bg-neutral-150 rounded text-neutral-600">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                 ))}
+                {filteredItems.map(item => {
+                  const isExpanded = expandedBoqId === item.id;
+                  return (
+                    <React.Fragment key={item.id}>
+                      <tr 
+                        tabIndex={0}
+                        aria-expanded={isExpanded}
+                        onClick={() => setExpandedBoqId(prev => (prev === item.id ? null : item.id))}
+                        onKeyDown={(evt) => {
+                          if (evt.key === 'Enter' || evt.key === ' ') {
+                            evt.preventDefault();
+                            setExpandedBoqId(prev => (prev === item.id ? null : item.id));
+                          }
+                        }}
+                        className={`hover:bg-neutral-50 cursor-pointer transition-colors ${isExpanded ? "bg-neutral-50/80 font-medium" : ""}`}
+                      >
+                        <td className="p-3 font-mono font-bold">{item.itemSlNo}</td>
+                        <td className="p-3 font-semibold">{item.itemName}</td>
+                        <td className="p-3 text-right font-mono">{item.itemQuantity.toLocaleString()}</td>
+                        <td className="p-3"><span className="bg-neutral-100 px-1 py-0.5 rounded font-bold font-mono">{item.itemUnit}</span></td>
+                        <td className="p-3 text-right font-mono">₹{item.itemRateAsPerEstimate.toLocaleString()}</td>
+                        <td className="p-3 text-right font-mono font-bold text-black border-l border-neutral-50">
+                          ₹{item.totalAmountPerItem.toLocaleString()}
+                        </td>
+                        <td className="p-3 text-right">
+                          <div className="flex gap-2 justify-end" onClick={(evt) => evt.stopPropagation()}>
+                            <button 
+                              type="button"
+                              onClick={(evt) => {
+                                evt.stopPropagation();
+                                handleEdit(item);
+                              }} 
+                              className="p-1 hover:bg-neutral-100 rounded text-neutral-600 cursor-pointer bg-white border border-neutral-200"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button 
+                              type="button"
+                              onClick={(evt) => {
+                                evt.stopPropagation();
+                                handleDelete(item.id);
+                              }} 
+                              className="p-1 hover:bg-neutral-150 rounded text-neutral-600 cursor-pointer bg-white border border-neutral-200"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr className="bg-neutral-50 border-b border-neutral-200">
+                          <td colSpan={7} className="p-4">
+                            <div className="border border-neutral-300 bg-white p-5 rounded-lg space-y-4 shadow-sm text-xs text-black">
+                              <div className="flex items-center justify-between border-b border-neutral-200 pb-2">
+                                <h4 className="font-bold uppercase tracking-wider text-[11px] text-black flex items-center gap-2">
+                                  <FileText className="w-4 h-4 text-neutral-600" />
+                                  BOQ Specification & Rate Breakdown
+                                </h4>
+                                <span className="font-mono text-[10px] text-neutral-400">Record ID: {item.id}</span>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                                <div>
+                                  <span className="block text-[10px] font-bold uppercase text-neutral-400">Item Sl No</span>
+                                  <span className="font-mono text-black font-semibold">{item.itemSlNo || "—"}</span>
+                                </div>
+                                <div className="sm:col-span-2">
+                                  <span className="block text-[10px] font-bold uppercase text-neutral-400">Specification Name</span>
+                                  <span className="font-bold text-black whitespace-pre-wrap overflow-wrap-anywhere">{item.itemName}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold uppercase text-neutral-400">Item Quantity</span>
+                                  <span className="font-mono text-black font-semibold">{item.itemQuantity.toLocaleString()}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold uppercase text-neutral-400">Unit of Measurement</span>
+                                  <span className="font-mono font-bold text-black">{item.itemUnit || "—"}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold uppercase text-neutral-400">Estimated Rate</span>
+                                  <span className="font-mono font-semibold text-black">₹{item.itemRateAsPerEstimate.toLocaleString()}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold uppercase text-neutral-400">Total Valuation</span>
+                                  <span className="font-mono font-bold text-black text-sm">₹{item.totalAmountPerItem.toLocaleString()}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
                 {filteredItems.length > 0 && (
                   <tr className="bg-neutral-50 font-bold border-t-2 border-neutral-200">
                     <td className="p-3"></td>
@@ -4429,6 +4872,7 @@ export function ExpenseUpdationView({
   const [searchQuery, setSearchQuery] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [expandedExpenseId, setExpandedExpenseId] = useState<string | null>(null);
   const [pendingExpenses, setPendingExpenses] = useState<Expense[]>([]);
 
   const getLocalDateString = () => {
@@ -4734,27 +5178,96 @@ export function ExpenseUpdationView({
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-100">
-                {filteredExpenses.map(exp => (
-                  <tr key={exp.id} className="hover:bg-neutral-50/50">
-                    <td className="p-3 font-mono font-medium text-black">
-                      {formatDate(exp.date)}
-                    </td>
-                    <td className="p-3 font-semibold text-neutral-800">{exp.description}</td>
-                    <td className="p-3 text-right font-mono font-bold text-black border-l border-neutral-50">
-                      ₹{exp.amount.toLocaleString()}
-                    </td>
-                    <td className="p-3 text-right">
-                      <div className="flex gap-2 justify-end">
-                        <button onClick={() => handleEdit(exp)} className="p-1 hover:bg-neutral-100 rounded text-neutral-600">
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button onClick={() => handleDelete(exp.id)} className="p-1 hover:bg-neutral-150 rounded text-neutral-600">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {filteredExpenses.map(exp => {
+                  const isExpanded = expandedExpenseId === exp.id;
+                  const linkedWork = [
+                    ...entries.map(e => ({ id: e.id, name: e.workName })),
+                    ...(privateWorks || []).map(p => ({ id: p.id, name: p.workName }))
+                  ].find(w => w.id === exp.workId);
+
+                  return (
+                    <React.Fragment key={exp.id}>
+                      <tr 
+                        tabIndex={0}
+                        aria-expanded={isExpanded}
+                        onClick={() => setExpandedExpenseId(prev => (prev === exp.id ? null : exp.id))}
+                        onKeyDown={(evt) => {
+                          if (evt.key === 'Enter' || evt.key === ' ') {
+                            evt.preventDefault();
+                            setExpandedExpenseId(prev => (prev === exp.id ? null : exp.id));
+                          }
+                        }}
+                        className={`hover:bg-neutral-50 cursor-pointer transition-colors ${isExpanded ? "bg-neutral-50/80 font-medium" : ""}`}
+                      >
+                        <td className="p-3 font-mono font-medium text-black">
+                          {formatDate(exp.date)}
+                        </td>
+                        <td className="p-3 font-semibold text-neutral-800">{exp.description}</td>
+                        <td className="p-3 text-right font-mono font-bold text-black border-l border-neutral-50">
+                          ₹{exp.amount.toLocaleString()}
+                        </td>
+                        <td className="p-3 text-right">
+                          <div className="flex gap-2 justify-end" onClick={(evt) => evt.stopPropagation()}>
+                            <button 
+                              type="button"
+                              onClick={(evt) => {
+                                evt.stopPropagation();
+                                handleEdit(exp);
+                              }} 
+                              className="p-1 hover:bg-neutral-100 rounded text-neutral-600 cursor-pointer bg-white border border-neutral-200"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button 
+                              type="button"
+                              onClick={(evt) => {
+                                evt.stopPropagation();
+                                handleDelete(exp.id);
+                              }} 
+                              className="p-1 hover:bg-neutral-150 rounded text-neutral-600 cursor-pointer bg-white border border-neutral-200"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr className="bg-neutral-50 border-b border-neutral-200">
+                          <td colSpan={4} className="p-4">
+                            <div className="border border-neutral-300 bg-white p-5 rounded-lg space-y-4 shadow-sm text-xs text-black">
+                              <div className="flex items-center justify-between border-b border-neutral-200 pb-2">
+                                <h4 className="font-bold uppercase tracking-wider text-[11px] text-black flex items-center gap-2">
+                                  <FileText className="w-4 h-4 text-neutral-600" />
+                                  Expense Record Breakdown
+                                </h4>
+                                <span className="font-mono text-[10px] text-neutral-400">Record ID: {exp.id}</span>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                                <div>
+                                  <span className="block text-[10px] font-bold uppercase text-neutral-400">Expense Date</span>
+                                  <span className="font-mono text-black font-semibold">{formatDate(exp.date)}</span>
+                                </div>
+                                <div className="sm:col-span-2">
+                                  <span className="block text-[10px] font-bold uppercase text-neutral-400">Description / Category</span>
+                                  <span className="font-bold text-black whitespace-pre-wrap overflow-wrap-anywhere">{exp.description}</span>
+                                </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold uppercase text-neutral-400">Amount Logged</span>
+                                  <span className="font-mono font-bold text-black text-sm">₹{exp.amount.toLocaleString()}</span>
+                                </div>
+                                <div className="sm:col-span-2">
+                                  <span className="block text-[10px] font-bold uppercase text-neutral-400">Linked Active Project Work</span>
+                                  <span className="font-semibold text-black">{linkedWork ? linkedWork.name : "—"}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
                 {filteredExpenses.length > 0 && (
                   <tr className="bg-neutral-50 font-bold border-t-2 border-neutral-200">
                     <td className="p-3"></td>
