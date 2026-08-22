@@ -1,12 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   Building2, Layers, Package, Fuel, Award, FileText, CheckSquare,
   PlusCircle, BookOpen, Warehouse, Compass, Menu, X, LogOut,
-  Receipt, TrendingUp, AlertCircle
+  Receipt, TrendingUp, AlertCircle, Bell, BellRing
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { evaluateDlpStatus } from "@/lib/dlp-utils";
+import {
+  getNotificationPermissionState, subscribeUserToPush, unsubscribeUserFromPush, isPushSupported
+} from "@/lib/push-client";
 import {
   createCementLoadAction, updateCementLoadAction, deleteCementLoadAction,
   createEntryAction, updateEntryAction, deleteEntryAction,
@@ -56,6 +60,43 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
   const [tarLoads, setTarLoads] = useState(initialData.tarLoads || []);
   const [workBasedEntries, setWorkBasedEntries] = useState(initialData.workBasedEntries || []);
   const [expenses, setExpenses] = useState(initialData.expenses || []);
+
+  // Push Notification & In-App Alerts State
+  const [pushState, setPushState] = useState<'default' | 'granted' | 'denied' | 'unsupported'>('default');
+  const [isPushLoading, setIsPushLoading] = useState(false);
+  const [showNotificationMenu, setShowNotificationMenu] = useState(false);
+
+  useEffect(() => {
+    setPushState(getNotificationPermissionState());
+  }, []);
+
+  const handleTogglePush = async () => {
+    if (isPushLoading) return;
+    setIsPushLoading(true);
+
+    if (pushState === 'granted') {
+      const res = await unsubscribeUserFromPush();
+      if (res.success) {
+        setPushState(getNotificationPermissionState());
+      }
+    } else {
+      const res = await subscribeUserToPush();
+      if (res.success) {
+        setPushState('granted');
+      } else {
+        setPushState(getNotificationPermissionState());
+        if (res.error) alert(res.error);
+      }
+    }
+    setIsPushLoading(false);
+  };
+
+  const dlpAlerts = useMemo(() => {
+    return (entries as Entry[]).map(entry => ({
+      entry,
+      dlp: evaluateDlpStatus(entry)
+    })).filter(item => item.dlp !== null && (item.dlp.isExpired || item.dlp.isExpiringSoon));
+  }, [entries]);
 
   const refreshAllStates = async () => {
     setLoading(true);
@@ -314,12 +355,123 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
 
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 sm:gap-4">
             {loading && (
-              <span className="text-[10px] uppercase font-bold tracking-wider text-neutral-400 animate-pulse">
+              <span className="text-[10px] uppercase font-bold tracking-wider text-neutral-400 animate-pulse hidden md:inline">
                 Syncing database...
               </span>
             )}
+
+            {/* Web Push Notification Control */}
+            {pushState === 'granted' ? (
+              <button
+                onClick={handleTogglePush}
+                disabled={isPushLoading}
+                title="Click to disable Web Push notifications"
+                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded hover:bg-green-100 transition-colors cursor-pointer"
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+                <span>Notifications Enabled</span>
+              </button>
+            ) : pushState === 'denied' ? (
+              <span
+                title="Browser notifications are blocked. Enable them in browser site settings."
+                className="hidden sm:inline-block text-[10px] font-semibold text-neutral-500 bg-neutral-100 px-2.5 py-1 border border-neutral-200 rounded"
+              >
+                Notifications Blocked
+              </span>
+            ) : (
+              <button
+                onClick={handleTogglePush}
+                disabled={isPushLoading}
+                title="Click to allow BuildCorp ERP to send Web Push notifications"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-black hover:bg-neutral-800 border border-black rounded transition-all cursor-pointer animate-pulse"
+              >
+                <BellRing className="w-3.5 h-3.5" />
+                <span>{isPushLoading ? "Enabling..." : "Enable Notifications"}</span>
+              </button>
+            )}
+
+            {/* In-App Bell Notification Indicator */}
+            <div className="relative">
+              <button
+                onClick={() => setShowNotificationMenu(prev => !prev)}
+                title="View in-app DLP notifications"
+                className="p-2 border border-neutral-200 hover:bg-neutral-100 rounded text-neutral-700 relative cursor-pointer bg-white flex items-center justify-center"
+              >
+                <Bell className="w-4 h-4" />
+                {dlpAlerts.length > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-600 text-white font-mono text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
+                    {dlpAlerts.length}
+                  </span>
+                )}
+              </button>
+
+              {/* In-App Notification Dropdown Popover */}
+              {showNotificationMenu && (
+                <div className="absolute right-0 mt-2 w-72 sm:w-80 bg-white border border-neutral-300 rounded shadow-xl z-50 p-4 space-y-3 text-left">
+                  <div className="flex items-center justify-between border-b border-neutral-200 pb-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-black flex items-center gap-1.5">
+                      <Bell className="w-3.5 h-3.5 text-black" />
+                      DLP Alerts ({dlpAlerts.length})
+                    </span>
+                    <button
+                      onClick={() => setShowNotificationMenu(false)}
+                      className="text-neutral-400 hover:text-black p-1 text-xs cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="max-h-60 overflow-y-auto space-y-2">
+                    {dlpAlerts.length === 0 ? (
+                      <p className="text-xs text-neutral-500 py-4 text-center font-medium">No active DLP alerts.</p>
+                    ) : (
+                      dlpAlerts.map(({ entry, dlp }: { entry: Entry; dlp: any }) => (
+                        <div
+                          key={entry.id}
+                          onClick={() => {
+                            setActiveTab("dlp-notifications");
+                            setShowNotificationMenu(false);
+                          }}
+                          className={`p-2.5 rounded border text-xs cursor-pointer transition-colors ${
+                            dlp!.isExpired ? 'border-red-300 bg-red-50/50 hover:bg-red-100/50' : 'border-yellow-300 bg-yellow-50/50 hover:bg-yellow-100/50'
+                          }`}
+                        >
+                          <div className="flex justify-between items-center mb-1">
+                            <span className="font-bold text-black text-xs truncate max-w-[170px]">{entry.workName}</span>
+                            <span className={`text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded ${
+                              dlp!.isExpired ? 'bg-red-600 text-white' : 'bg-yellow-500 text-white'
+                            }`}>
+                              {dlp!.status}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-neutral-600">
+                            {dlp!.isExpired
+                              ? `Expired on ${new Date(dlp!.dlpExpiryDate).toLocaleDateString('en-IN')}`
+                              : `Expires on ${new Date(dlp!.dlpExpiryDate).toLocaleDateString('en-IN')} (${dlp!.daysRemaining} days left)`}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="pt-2 border-t border-neutral-100 flex justify-between items-center text-[10px]">
+                    <span className="text-neutral-500 font-medium">Web Push Active</span>
+                    <button
+                      onClick={() => {
+                        setActiveTab("dlp-notifications");
+                        setShowNotificationMenu(false);
+                      }}
+                      className="font-bold text-black hover:underline uppercase cursor-pointer"
+                    >
+                      View All Notifications &rarr;
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* User info */}
             <span className="hidden md:block text-xs text-neutral-500 font-medium">
               {user?.email ?? user?.name ?? 'User'}

@@ -322,3 +322,38 @@ model Expense {
   @@index([ownerEmail])
   @@index([organizationId])
 }
+
+// ── WEB PUSH NOTIFICATIONS & DLP LOG ─────────────────────────────────────────
+
+model PushSubscription {
+  id             String   @id @default(cuid()) @map("_id")
+  userId         String
+  organizationId String?
+  ownerEmail     String
+  endpoint       String   @unique
+  p256dh         String
+  auth           String
+  userAgent      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([userId])
+  @@index([ownerEmail])
+  @@index([organizationId])
+}
+
+model DlpNotificationLog {
+  id               String   @id @default(cuid()) @map("_id")
+  entryId          String
+  userId           String
+  organizationId   String?
+  ownerEmail       String?
+  notificationType String
+  expiryDate       DateTime
+  sentAt           DateTime @default(now())
+
+  @@unique([entryId, userId, notificationType, expiryDate])
+  @@index([organizationId])
+  @@index([userId])
+  @@index([ownerEmail])
+}
