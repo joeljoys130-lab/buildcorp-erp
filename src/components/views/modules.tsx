@@ -420,12 +420,26 @@ export function CementLoadView({
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      {/* Enterprise Document Print Header — Only visible in print output */}
+      <div className="hidden print:block mb-6 border-b border-black pb-4">
+        <div className="flex justify-between items-end">
+          <div>
+            <h1 className="text-xl font-bold tracking-tight uppercase text-black font-mono">BUILDCORP ERP</h1>
+            <p className="text-[9px] text-neutral-600 tracking-wider uppercase font-semibold">Enterprise Construction Management</p>
+          </div>
+          <div className="text-right text-[10px] text-neutral-600">
+            <span className="font-bold text-black block uppercase tracking-wider">CEMENT LOAD UPDATION REGISTER</span>
+            <span>Generated on: {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex justify-between items-center print:hidden">
         <div>
           <h2 className="text-xl font-bold tracking-tight text-black">Cement Load Updation</h2>
           <p className="text-xs text-neutral-500">Record purchases, update stock levels, and track remaining balances.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 print:hidden">
           <button
             onClick={() => exportCSV(cementLoads, "cement_loads")}
             className="px-3 py-1.5 border border-neutral-300 text-xs font-semibold hover:bg-neutral-100 rounded text-black bg-white cursor-pointer"
@@ -476,7 +490,7 @@ export function CementLoadView({
       </div>
 
       {showForm && (
-        <form onSubmit={handleSave} className="border border-neutral-300 bg-white p-5 rounded space-y-6">
+        <form onSubmit={handleSave} className="border border-neutral-300 bg-white p-5 rounded space-y-6 print:hidden">
           <h3 className="text-xs font-bold uppercase tracking-wider text-black border-b border-neutral-200 pb-2">
             {editingId ? "Update Cement Load" : "New Cement Load Details"}
           </h3>
@@ -1177,12 +1191,26 @@ export function EntryView({
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      {/* Enterprise Document Print Header — Only visible in print output */}
+      <div className="hidden print:block mb-6 border-b border-black pb-4">
+        <div className="flex justify-between items-end">
+          <div>
+            <h1 className="text-xl font-bold tracking-tight uppercase text-black font-mono">BUILDCORP ERP</h1>
+            <p className="text-[9px] text-neutral-600 tracking-wider uppercase font-semibold">Enterprise Construction Management</p>
+          </div>
+          <div className="text-right text-[10px] text-neutral-600">
+            <span className="font-bold text-black block uppercase tracking-wider">CONTRACT WORK ENTRY REGISTER</span>
+            <span>Generated on: {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex justify-between items-center print:hidden">
         <div>
           <h2 className="text-xl font-bold tracking-tight text-black">Entry</h2>
           <p className="text-xs text-neutral-500">Record work details, agreements, SLA specifications, and handover timelines.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 print:hidden">
           <button
             onClick={() => exportCSV(entries, "work_entries")}
             className="px-3 py-1.5 border border-neutral-300 text-xs font-semibold hover:bg-neutral-100 rounded text-black bg-white cursor-pointer"
@@ -1213,7 +1241,7 @@ export function EntryView({
       </div>
 
       {showForm && (
-        <form onSubmit={handleSave} className="border border-neutral-300 bg-white p-5 rounded space-y-4">
+        <form onSubmit={handleSave} className="border border-neutral-300 bg-white p-5 rounded space-y-4 print:hidden">
           <h3 className="text-xs font-bold uppercase border-b border-neutral-200 pb-2 text-black">
             {editingId ? "Update Entry details" : "New Contract / Project Entry"}
           </h3>
@@ -1410,7 +1438,7 @@ export function EntryView({
 
       {/* Main Table view */}
       <div className="border border-neutral-200 bg-white rounded overflow-hidden">
-        <div className="p-4 border-b border-neutral-100 flex items-center justify-between">
+        <div className="p-4 border-b border-neutral-100 flex items-center justify-between print:hidden">
           <div className="relative w-64">
             <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-neutral-400" />
             <input
@@ -1907,12 +1935,26 @@ export function StockRegisterView({
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      {/* Enterprise Document Print Header — Only visible in print output */}
+      <div className="hidden print:block mb-6 border-b border-black pb-4">
+        <div className="flex justify-between items-end">
+          <div>
+            <h1 className="text-xl font-bold tracking-tight uppercase text-black font-mono">BUILDCORP ERP</h1>
+            <p className="text-[9px] text-neutral-600 tracking-wider uppercase font-semibold">Enterprise Construction Management</p>
+          </div>
+          <div className="text-right text-[10px] text-neutral-600">
+            <span className="font-bold text-black block uppercase tracking-wider">RAW MATERIAL STOCK REGISTER</span>
+            <span>Generated on: {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex justify-between items-center print:hidden">
         <div>
           <h2 className="text-xl font-bold tracking-tight text-black">Stock Register</h2>
           <p className="text-xs text-neutral-500">Real-time inventory levels of raw building material aggregates.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 print:hidden">
           <button
             onClick={() => exportCSV(stockItems, "stock_register")}
             className="px-3 py-1.5 border border-neutral-300 text-xs font-semibold hover:bg-neutral-100 rounded text-black bg-white cursor-pointer"
@@ -2309,13 +2351,27 @@ export function MaterialsUsedView({
 
   return (
     <div className="space-y-6">
-      <div>
+      {/* Enterprise Document Print Header — Only visible in print output */}
+      <div className="hidden print:block mb-6 border-b border-black pb-4">
+        <div className="flex justify-between items-end">
+          <div>
+            <h1 className="text-xl font-bold tracking-tight uppercase text-black font-mono">BUILDCORP ERP</h1>
+            <p className="text-[9px] text-neutral-600 tracking-wider uppercase font-semibold">Enterprise Construction Management</p>
+          </div>
+          <div className="text-right text-[10px] text-neutral-600">
+            <span className="font-bold text-black block uppercase tracking-wider">TOTAL MATERIALS USED IN SITE REPORT</span>
+            <span>Generated on: {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="print:hidden">
         <h2 className="text-xl font-bold tracking-tight">Total Materials Used in Site</h2>
         <p className="text-xs text-neutral-500 font-medium">Select a contract work to log estimated deliverables and reconcile materials dispatched to the site.</p>
       </div>
 
       {/* Action Toolbar */}
-      <div className="flex gap-2 mb-4">
+      <div className="flex gap-2 mb-4 print:hidden">
         <button
           onClick={() => exportMaterialsUsedExcel(siteMaterials, entries, privateWorks)}
           className="px-3 py-1.5 border border-neutral-300 text-xs font-semibold hover:bg-neutral-100 rounded text-black bg-white cursor-pointer"
@@ -2336,7 +2392,7 @@ export function MaterialsUsedView({
         </button>
       </div>
       {/* Search Input */}
-      <div className="relative w-64 mb-4">
+      <div className="relative w-64 mb-4 print:hidden">
         <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-neutral-400" />
         <input
           type="text" placeholder="Search work name..." value={workSearchQuery} onChange={(e) => handleWorkSearch(e.target.value)}
@@ -2345,7 +2401,7 @@ export function MaterialsUsedView({
       </div>
 
       {/* Select work name drop-down */}
-      <div className="border border-neutral-200 bg-white p-4 rounded space-y-4">
+      <div className="border border-neutral-200 bg-white p-4 rounded space-y-4 print:hidden">
         <div>
           <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1.5">Select Work Name</label>
           <select
@@ -3452,8 +3508,22 @@ export function TarLoadView({
 
   return (
     <div className="space-y-6">
+      {/* Enterprise Document Print Header — Only visible in print output */}
+      <div className="hidden print:block mb-6 border-b border-black pb-4">
+        <div className="flex justify-between items-end">
+          <div>
+            <h1 className="text-xl font-bold tracking-tight uppercase text-black font-mono">BUILDCORP ERP</h1>
+            <p className="text-[9px] text-neutral-600 tracking-wider uppercase font-semibold">Enterprise Construction Management</p>
+          </div>
+          <div className="text-right text-[10px] text-neutral-600">
+            <span className="font-bold text-black block uppercase tracking-wider">TAR & BITUMEN LOAD UPDATION REGISTER</span>
+            <span>Generated on: {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+          </div>
+        </div>
+      </div>
+
       {/* Action Toolbar */}
-      <div className="flex gap-2 mb-4">
+      <div className="flex gap-2 mb-4 print:hidden">
         <button
           onClick={() => exportCSV(tarLoads, "tar_loads")}
           className="px-3 py-1.5 border border-neutral-300 text-xs font-semibold hover:bg-neutral-100 rounded text-black bg-white cursor-pointer"
@@ -3473,12 +3543,12 @@ export function TarLoadView({
           Back
         </button>
       </div>
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center print:hidden">
         <div>
           <h2 className="text-xl font-bold tracking-tight">Tar Load Updation</h2>
           <p className="text-xs text-neutral-500">Log incoming road paving emulsions, VG-30 Bitumen packs, and calculate balances.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 print:hidden">
           {!showForm && (
             <button
               onClick={() => { clearForm(); setEditingId(null); setShowForm(true); }}
@@ -3941,15 +4011,32 @@ export function WorkBasedEntryView({
     ...(privateWorks || []).map(p => ({ id: p.id, name: p.workName, type: 'private' as const }))
   ].filter(opt => opt.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
+  const selectedWorkName = filteredWorkOptions.find(o => o.id === selectedEntryId)?.name || "";
+
   return (
     <div className="space-y-6">
-      <div>
+      {/* Enterprise Document Print Header — Only visible in print output */}
+      <div className="hidden print:block mb-6 border-b border-black pb-4">
+        <div className="flex justify-between items-end">
+          <div>
+            <h1 className="text-xl font-bold tracking-tight uppercase text-black font-mono">BUILDCORP ERP</h1>
+            <p className="text-[9px] text-neutral-600 tracking-wider uppercase font-semibold">Enterprise Construction Management</p>
+          </div>
+          <div className="text-right text-[10px] text-neutral-600">
+            <span className="font-bold text-black block uppercase tracking-wider">BOQ ESTIMATE & VALUATION SHEET</span>
+            {selectedWorkName && <span className="block text-black font-semibold mt-0.5">{selectedWorkName}</span>}
+            <span>Generated on: {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="print:hidden">
         <h2 className="text-xl font-bold tracking-tight">Work Based Entry (Item Estimator)</h2>
         <p className="text-xs text-neutral-500 font-medium">Link detailed bill-of-quantities (BOQ) specifications and rates to concrete projects.</p>
       </div>
 
       {/* Search Input */}
-      <div className="relative w-64 mb-4">
+      <div className="relative w-64 mb-4 print:hidden">
         <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-neutral-400" />
         <input
           type="text" placeholder="Search work name..." value={searchQuery} onChange={(e) => handleWorkSearch(e.target.value)}
@@ -3957,7 +4044,7 @@ export function WorkBasedEntryView({
         />
       </div>
 
-      <div className="border border-neutral-200 bg-white p-4 rounded space-y-4">
+      <div className="border border-neutral-200 bg-white p-4 rounded space-y-4 print:hidden">
         <div>
           <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1.5">Select Work Name</label>
           <select
@@ -3981,23 +4068,32 @@ export function WorkBasedEntryView({
               <span className="text-[9px] uppercase font-bold text-neutral-400">Total BOQ Estimate Value</span>
               <div className="text-lg font-mono font-bold text-black">₹{totalBOQValuation.toLocaleString()}</div>
             </div>
-            {!showForm && (
+            <div className="flex gap-2 print:hidden">
               <button
-                onClick={() => {
-                  clearForm();
-                  setEditingId(null);
-                  setItemSlNo((filteredItems.length + 1).toString());
-                  setShowForm(true);
-                }}
-                className="px-3 py-1.5 bg-black text-white hover:bg-neutral-900 text-xs font-semibold rounded uppercase tracking-wider flex items-center gap-1 cursor-pointer"
+                type="button"
+                onClick={() => window.print()}
+                className="px-3 py-1.5 border border-neutral-300 text-xs font-semibold hover:bg-neutral-100 rounded text-black bg-white cursor-pointer flex items-center gap-1.5"
               >
-                <Plus className="w-3.5 h-3.5" /> Add Estimate Item
+                <Printer className="w-3.5 h-3.5" /> Print Sheet
               </button>
-            )}
+              {!showForm && (
+                <button
+                  onClick={() => {
+                    clearForm();
+                    setEditingId(null);
+                    setItemSlNo((filteredItems.length + 1).toString());
+                    setShowForm(true);
+                  }}
+                  className="px-3 py-1.5 bg-black text-white hover:bg-neutral-900 text-xs font-semibold rounded uppercase tracking-wider flex items-center gap-1 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add Estimate Item
+                </button>
+              )}
+            </div>
           </div>
 
           {showForm && (
-            <form onSubmit={handleSave} className="border border-black bg-white p-4 rounded space-y-4">
+            <form onSubmit={handleSave} className="border border-black bg-white p-4 rounded space-y-4 print:hidden">
               <h4 className="text-xs font-bold uppercase border-b border-neutral-100 pb-2">{editingId ? "Update BOQ Item" : "New BOQ Item Details"}</h4>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 <div>
@@ -4319,13 +4415,13 @@ export function WorkBasedRegisterView({
 
   return (
     <div className="space-y-6">
-      <div>
+      <div className="print:hidden">
         <h2 className="text-xl font-bold tracking-tight">Work Based Register</h2>
         <p className="text-xs text-neutral-500 font-medium">Consolidated view of all contract executions with search parameters and filter configurations.</p>
       </div>
 
       {/* Filter panel */}
-      <div className="border border-neutral-200 bg-white p-5 rounded space-y-4">
+      <div className="border border-neutral-200 bg-white p-5 rounded space-y-4 print:hidden">
         <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400 pb-2 border-b border-neutral-100 flex items-center gap-1.5">
           <Filter className="w-3.5 h-3.5 text-black" /> Filter Parameters
         </h3>
@@ -4396,7 +4492,7 @@ export function WorkBasedRegisterView({
       </div>
 
       {/* Matching Works Results Table */}
-      <div className="border border-neutral-200 bg-white rounded overflow-hidden">
+      <div className="border border-neutral-200 bg-white rounded overflow-hidden print:hidden">
         <div className="p-3 bg-neutral-50 border-b border-neutral-200">
           <h3 className="font-bold text-xs uppercase text-neutral-800">Matching Contract & Private Works ({filteredWorks.length})</h3>
         </div>
@@ -4451,7 +4547,21 @@ export function WorkBasedRegisterView({
       </div>
 
       {selectedWork && (
-        <div className="space-y-6 animate-fade-in bg-white border border-neutral-200 rounded p-6">
+        <div className="space-y-6 animate-fade-in bg-white border border-neutral-200 rounded p-6 print:border-none print:p-0 print:m-0 w-full">
+          {/* Enterprise Document Print Header — Only visible in print output */}
+          <div className="hidden print:block mb-6 border-b border-black pb-4">
+            <div className="flex justify-between items-end">
+              <div>
+                <h1 className="text-xl font-bold tracking-tight uppercase text-black font-mono">BUILDCORP ERP</h1>
+                <p className="text-[9px] text-neutral-600 tracking-wider uppercase font-semibold">Enterprise Construction Management</p>
+              </div>
+              <div className="text-right text-[10px] text-neutral-600">
+                <span className="font-bold text-black block uppercase tracking-wider">WORK BASED REGISTER SHEET</span>
+                <span>Generated on: {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+              </div>
+            </div>
+          </div>
+
           <div className="flex justify-between items-start border-b border-neutral-100 pb-4">
             <div>
               <span className="text-[9px] uppercase font-bold text-neutral-400 bg-neutral-100 px-2 py-0.5 rounded">
@@ -4467,7 +4577,7 @@ export function WorkBasedRegisterView({
             </div>
             <button
               onClick={() => window.print()}
-              className="px-3 py-1.5 bg-black text-white hover:bg-neutral-900 text-xs font-semibold rounded uppercase tracking-wider flex items-center gap-1.5"
+              className="px-3 py-1.5 bg-black text-white hover:bg-neutral-900 text-xs font-semibold rounded uppercase tracking-wider flex items-center gap-1.5 print:hidden"
             >
               <Printer className="w-3.5 h-3.5" /> Print Sheet
             </button>
@@ -5275,15 +5385,32 @@ export function ExpenseUpdationView({
 
 ;
 
+  const selectedExpenseWorkName = filteredWorkOptions.find(o => o.id === selectedEntryId)?.name || "";
+
   return (
     <div className="space-y-6">
-      <div>
+      {/* Enterprise Document Print Header — Only visible in print output */}
+      <div className="hidden print:block mb-6 border-b border-black pb-4">
+        <div className="flex justify-between items-end">
+          <div>
+            <h1 className="text-xl font-bold tracking-tight uppercase text-black font-mono">BUILDCORP ERP</h1>
+            <p className="text-[9px] text-neutral-600 tracking-wider uppercase font-semibold">Enterprise Construction Management</p>
+          </div>
+          <div className="text-right text-[10px] text-neutral-600">
+            <span className="font-bold text-black block uppercase tracking-wider">PROJECT EXPENSE LOG SHEET</span>
+            {selectedExpenseWorkName && <span className="block text-black font-semibold mt-0.5">{selectedExpenseWorkName}</span>}
+            <span>Generated on: {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="print:hidden">
         <h2 className="text-xl font-bold tracking-tight">Expense Updation</h2>
         <p className="text-xs text-neutral-500 font-medium">Log and track daily operational expenses associated with ongoing projects.</p>
       </div>
 
       {/* Search Input */}
-      <div className="relative w-64 mb-4">
+      <div className="relative w-64 mb-4 print:hidden">
         <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-neutral-400" />
         <input
           type="text" placeholder="Search work name..." value={searchQuery} onChange={(e) => handleWorkSearch(e.target.value)}
@@ -5291,7 +5418,7 @@ export function ExpenseUpdationView({
         />
       </div>
 
-      <div className="border border-neutral-200 bg-white p-4 rounded space-y-4">
+      <div className="border border-neutral-200 bg-white p-4 rounded space-y-4 print:hidden">
         <div>
           <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1.5">Select Work Name</label>
           <select
@@ -5315,18 +5442,27 @@ export function ExpenseUpdationView({
               <span className="text-[9px] uppercase font-bold text-neutral-400">Total Expenses Logged</span>
               <div className="text-lg font-mono font-bold text-black font-semibold">₹{totalExpenseValuation.toLocaleString()}</div>
             </div>
-            {!showForm && (
+            <div className="flex gap-2 print:hidden">
               <button
-                onClick={() => { clearForm(); setEditingId(null); setShowForm(true); }}
-                className="px-3 py-1.5 bg-black text-white hover:bg-neutral-900 text-xs font-semibold rounded uppercase tracking-wider flex items-center gap-1"
+                type="button"
+                onClick={() => window.print()}
+                className="px-3 py-1.5 border border-neutral-300 text-xs font-semibold hover:bg-neutral-100 rounded text-black bg-white cursor-pointer flex items-center gap-1.5"
               >
-                <Plus className="w-3.5 h-3.5" /> Add Expense Row
+                <Printer className="w-3.5 h-3.5" /> Print Sheet
               </button>
-            )}
+              {!showForm && (
+                <button
+                  onClick={() => { clearForm(); setEditingId(null); setShowForm(true); }}
+                  className="px-3 py-1.5 bg-black text-white hover:bg-neutral-900 text-xs font-semibold rounded uppercase tracking-wider flex items-center gap-1"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add Expense Row
+                </button>
+              )}
+            </div>
           </div>
 
           {showForm && (
-            <form onSubmit={handleSave} className="border border-black bg-white p-4 rounded space-y-4">
+            <form onSubmit={handleSave} className="border border-black bg-white p-4 rounded space-y-4 print:hidden">
               <h4 className="text-xs font-bold uppercase border-b border-neutral-100 pb-2">
                 {editingId ? "Update Expense Item" : "New Expense Details"}
               </h4>
@@ -5629,7 +5765,7 @@ export function ProfitCalculationView({
   };
 
   return (
-    <div className="space-y-6 max-w-xl mx-auto animate-fade-in text-black print:p-0">
+    <div className="space-y-6 max-w-xl mx-auto animate-fade-in text-black print:p-0 print:max-w-none print:m-0 w-full">
       <div className="print:hidden">
         <h2 className="text-xl font-bold tracking-tight uppercase">Profit Calculation</h2>
         <p className="text-xs text-neutral-500 font-medium">Auto-calculated project profitability register synced with Materials & Expenses.</p>
@@ -5666,7 +5802,20 @@ export function ProfitCalculationView({
 
       {/* Profit Calculation Screen Sheet */}
       {selectedWork ? (
-        <div className="border border-black bg-white rounded p-6 shadow-xs space-y-6 print:border-none print:p-0">
+        <div className="border border-black bg-white rounded p-6 shadow-xs space-y-6 print:border-none print:p-0 w-full">
+          {/* Enterprise Document Print Header — Only visible in print output */}
+          <div className="hidden print:block mb-6 border-b border-black pb-4">
+            <div className="flex justify-between items-end">
+              <div>
+                <h1 className="text-xl font-bold tracking-tight uppercase text-black font-mono">BUILDCORP ERP</h1>
+                <p className="text-[9px] text-neutral-600 tracking-wider uppercase font-semibold">Enterprise Construction Management</p>
+              </div>
+              <div className="text-right text-[10px] text-neutral-600">
+                <span className="font-bold text-black block uppercase tracking-wider">PROJECT FINANCIAL STATEMENT</span>
+                <span>Generated on: {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+              </div>
+            </div>
+          </div>
           <div className="text-center border-b border-black pb-4">
             <h3 className="text-md font-bold uppercase tracking-widest font-mono">ARAVIND ASSOCIATES</h3>
             <p className="text-[9px] uppercase tracking-wider text-neutral-500 font-mono mt-0.5">Project Financial Statement</p>

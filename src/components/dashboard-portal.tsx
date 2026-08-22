@@ -656,17 +656,6 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
             />
           )}
 
-          {activeTab === "profit-calculation" && (
-            <ProfitCalculationView
-              entries={entries}
-              privateWorks={privateWorks}
-              cementLoads={cementLoads}
-              tarLoads={tarLoads}
-              expenses={expenses}
-              onNavigate={setActiveTab}
-            />
-          )}
-
         </main>
       </div>
     </div>

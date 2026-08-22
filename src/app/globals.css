@@ -291,3 +291,131 @@ body {
   scrollbar-width: none;
 }
 
+/* ── CENTRALIZED PRODUCTION PRINT / PDF SYSTEM ─────────────────────────── */
+@media print {
+  /* 1. Page setup & A4 margins */
+  @page {
+    size: A4 portrait;
+    margin: 12mm 12mm;
+  }
+
+  /* 2. Color accuracy & background force */
+  *, *::before, *::after {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  /* 3. Reset root background and margins */
+  html, body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 10pt !important;
+    line-height: 1.4 !important;
+    width: 100% !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* 4. Hide all global navigation, sidebars, headers, floating widgets, action bars, search/filter controls */
+  .no-print,
+  .print\:hidden,
+  aside,
+  header,
+  nav,
+  button,
+  form,
+  input,
+  select,
+  textarea,
+  .sidebar,
+  .navbar,
+  .dashboard-controls,
+  .search-controls,
+  .filter-controls,
+  .notification-controls {
+    display: none !important;
+  }
+
+  /* 5. Force main content container to take full page width without offset or sidebar spacing */
+  main,
+  .flex-1,
+  .print-full-width,
+  .max-w-xl,
+  .max-w-4xl,
+  .max-w-6xl {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    overflow: visible !important;
+    position: static !important;
+  }
+
+  /* 6. Page break controls & section protection */
+  .break-inside-avoid,
+  .print-avoid-break,
+  .glass-card,
+  .space-y-6 > div,
+  .space-y-4 > div {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* 7. Table printing rules */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    margin-top: 8pt !important;
+    margin-bottom: 12pt !important;
+    font-size: 9.5pt !important;
+  }
+
+  thead {
+    display: table-header-group !important;
+  }
+
+  tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  th, td {
+    padding: 6pt 8pt !important;
+    border: 1px solid #d4d4d8 !important;
+  }
+
+  th {
+    background-color: #fafafa !important;
+    color: #000000 !important;
+    font-weight: 700 !important;
+  }
+
+  /* 8. Text & Border Colors for Crisp Monochromatic Print */
+  .border-neutral-100, .border-neutral-200, .border-neutral-300 {
+    border-color: #d4d4d8 !important;
+  }
+
+  .text-neutral-400, .text-neutral-500, .text-neutral-600 {
+    color: #52525b !important;
+  }
+
+  .text-black, .text-neutral-800, .text-neutral-900 {
+    color: #000000 !important;
+  }
+
+  .bg-neutral-50, .bg-neutral-100 {
+    background-color: #f4f4f5 !important;
+  }
+
+  /* 9. Dedicated Print-Only Report Utilities */
+  .print-only {
+    display: block !important;
+  }
+}
+
