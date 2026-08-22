@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { 
-  Building2, Layers, Package, Fuel, TrendingUp, Calendar, ArrowRight, 
-  Award, FileText, CheckSquare, PlusCircle, BookOpen, Warehouse, Compass, X
+import {
+  Building2, Layers, Package, Fuel, TrendingUp, Calendar, ArrowRight,
+  Award, FileText, CheckSquare, PlusCircle, BookOpen, Warehouse, Compass, X, AlertCircle
 } from "lucide-react";
 import { CementLoad, Entry, StockRegisterItem, PrivateWork, TarLoad, WorkBasedEntry, Expense } from "@/lib/types";
+
+import { evaluateDlpStatus } from "@/lib/dlp-utils";
 
 interface DashboardViewProps {
   data: {
@@ -36,7 +38,7 @@ export default function DashboardView({ data, onNavigate }: DashboardViewProps) 
 
   const totalCementBags = cementLoads.reduce((sum, item) => sum + item.loadInBags, 0);
   const totalTarKg = tarLoads.reduce((sum, item) => sum + item.quantityInKg, 0);
-  
+
   const ongoingContractsCount = entries.filter(e => e.status === 'Ongoing').length;
   const ongoingPrivateWorksCount = privateWorks.length; // Private works are all considered ongoing (no status field)
   const activeWorksCount = ongoingContractsCount + ongoingPrivateWorksCount;
@@ -54,21 +56,45 @@ export default function DashboardView({ data, onNavigate }: DashboardViewProps) 
   const projectedProfit = portfolioValuation - totalExpenses;
   const realizedProfit = totalPaymentsReceived - totalExpenses;
 
-  // Compute upcoming work completion alerts
+  // Compute upcoming work completion alerts & DLP alerts
   const now = new Date();
-  const alerts = entries.map(entry => {
+  const alerts: any[] = [];
+
+  // DLP Alerts (Authoritative Rule: Actual Completion + DLP Period)
+  entries.forEach(entry => {
+    const dlp = evaluateDlpStatus(entry);
+    if (dlp && dlp.isExpired) {
+      alerts.push({
+        id: `dlp-exp-${entry.id}`,
+        type: 'important',
+        targetTab: 'dlp-notifications',
+        message: `DLP Period Expired: "${entry.workName}" crossed DLP on ${dlp.dlpExpiryDate.toISOString().substring(0, 10)}. Click to view.`
+      });
+    } else if (dlp && dlp.isExpiringSoon) {
+      alerts.push({
+        id: `dlp-soon-${entry.id}`,
+        type: 'warning',
+        targetTab: 'dlp-notifications',
+        message: `DLP Expiring Soon: "${entry.workName}" expires on ${dlp.dlpExpiryDate.toISOString().substring(0, 10)} (${dlp.daysRemaining} days left).`
+      });
+    }
+  });
+
+  // Upcoming Work Completion Alerts
+  entries.forEach(entry => {
+    if (!entry.workCompletionDateAsPerAgreement) return;
     const compDate = new Date(entry.workCompletionDateAsPerAgreement);
+    if (isNaN(compDate.getTime())) return;
     const diffMs = compDate.getTime() - now.getTime();
     const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
     if (diffDays <= 2 && diffDays >= 0) {
-      return { id: entry.id, type: 'important', message: `Work "${entry.workName}" completes in ${diffDays} day(s) – IMPORTANT!` };
+      alerts.push({ id: `comp-${entry.id}`, type: 'important', targetTab: 'entry', message: `Work "${entry.workName}" completes in ${diffDays} day(s) – IMPORTANT!` });
     } else if (diffDays <= 3 && diffDays > 2) {
-      return { id: entry.id, type: 'warning', message: `Work "${entry.workName}" completes in ${diffDays} days.` };
+      alerts.push({ id: `comp-${entry.id}`, type: 'warning', targetTab: 'entry', message: `Work "${entry.workName}" completes in ${diffDays} days.` });
     } else if (diffDays <= 7 && diffDays > 3) {
-      return { id: entry.id, type: 'info', message: `Work "${entry.workName}" completes in ${diffDays} days.` };
+      alerts.push({ id: `comp-${entry.id}`, type: 'info', targetTab: 'entry', message: `Work "${entry.workName}" completes in ${diffDays} days.` });
     }
-    return null;
-  }).filter(Boolean);
+  });
 
   const stats = [
     { label: "Active Works", value: activeWorksCount, desc: "Ongoing contracts + private works" },
@@ -82,11 +108,12 @@ export default function DashboardView({ data, onNavigate }: DashboardViewProps) 
   const modules = [
     { id: "cement-load", label: "Cement Load Updation", icon: Package, desc: "Record cement purchase bills, load bags, and monitor remaining balances." },
     { id: "entry", label: "Contract Entry", icon: FileText, desc: "Register government contracts, SLA timelines, stamp papers, and performance guarantees." },
+    { id: "dlp-notifications", label: "DLP Notifications", icon: AlertCircle, desc: "Monitor works whose Defect Liability Period has expired based on Actual Completion." },
     { id: "stock-register", label: "Stock Register", icon: Warehouse, desc: "Real-time stock ledger of Cement, RS1, SS1, and VG30 Bitumen aggregates." },
     { id: "materials-used", label: "Materials Used in Site", icon: Compass, desc: "Map and reconcile estimated deliverables against stock delivered to construction sites." },
     { id: "private-work", label: "Private Work Status / Entry", icon: Award, desc: "Log private non-tender civil jobs, advance amounts, site visits, and final payments." },
     { id: "tar-load", label: "Tar Load Updation", icon: Fuel, desc: "Track incoming Bitumen tankers, addressed office targets, and paid balances." },
-    { id: "work-based-entry", label: "Work Based Entry", icon: PlusCircle, desc: "Build detailed bill-of-quantities (BOQ) line items and rates linked to projects." },
+    { id: "work-based-entry", label: "Work Based Entry", icon: PlusCircle, desc: "Build detailed bill-of-quantities (BOQ) line items and sub-item descriptions." },
     { id: "work-based-register", label: "Work Based Register", icon: BookOpen, desc: "Consolidated filter register of contract executions, payment logs, and item details." },
     { id: "office-wise-work", label: "Office Wise Work List", icon: Building2, desc: "Group and display ongoing construction projects by PWD or NHAI regional offices." },
     { id: "work-status-updation", label: "Work Status / Updation", icon: CheckSquare, desc: "Update contract execution parameters, timeline details, and progress status." },
@@ -94,12 +121,19 @@ export default function DashboardView({ data, onNavigate }: DashboardViewProps) 
 
   // Render alerts UI
   const renderAlert = (alert: any) => {
-    const baseStyle = "p-3 rounded mb-2 text-sm font-medium";
+    const baseStyle = "p-3 rounded mb-2 text-sm font-medium cursor-pointer transition-opacity hover:opacity-90 flex items-center justify-between";
     let style = "bg-blue-100 text-blue-800"; // info
-    if (alert.type === 'warning') style = "bg-yellow-100 text-yellow-800";
-    if (alert.type === 'important') style = "bg-red-100 text-red-800 border border-red-400 animate-pulse";
+    if (alert.type === 'warning') style = "bg-yellow-100 text-yellow-800 border border-yellow-300";
+    if (alert.type === 'important') style = "bg-red-100 text-red-800 border border-red-400 font-bold animate-pulse";
     return (
-      <div key={alert.id} className={`${baseStyle} ${style}`}>🚨 {alert.message}</div>
+      <div
+        key={alert.id}
+        onClick={() => onNavigate(alert.targetTab || "entry")}
+        className={`${baseStyle} ${style}`}
+      >
+        <span>🚨 {alert.message}</span>
+        <span className="text-xs underline font-semibold ml-2">View &rarr;</span>
+      </div>
     );
   };
 
@@ -126,8 +160,8 @@ export default function DashboardView({ data, onNavigate }: DashboardViewProps) 
       {/* KPI Cards Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((stat, i) => (
-          <div 
-            key={i} 
+          <div
+            key={i}
             onClick={() => setSelectedKpi(stat.label)}
             className="border border-neutral-200 bg-white p-5 rounded cursor-pointer hover:border-black transition-colors"
           >
@@ -144,7 +178,7 @@ export default function DashboardView({ data, onNavigate }: DashboardViewProps) 
           Portfolio Profitability & Financial Health
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div 
+          <div
             onClick={() => setSelectedKpi("Total Portfolio Valuation")}
             className="border border-neutral-200 bg-white p-5 rounded flex flex-col justify-between cursor-pointer hover:border-black transition-colors"
           >
@@ -157,7 +191,7 @@ export default function DashboardView({ data, onNavigate }: DashboardViewProps) 
               <span>Private: ₹{formatNumber(privateWorksValuation)}</span>
             </div>
           </div>
-          <div 
+          <div
             onClick={() => setSelectedKpi("Total Operational Cost / Expenses")}
             className="border border-neutral-200 bg-white p-5 rounded flex flex-col justify-between cursor-pointer hover:border-black transition-colors"
           >
@@ -169,7 +203,7 @@ export default function DashboardView({ data, onNavigate }: DashboardViewProps) 
               All logged machine rents, labor wages, fuel, and site fees.
             </div>
           </div>
-          <div 
+          <div
             onClick={() => setSelectedKpi("Projected Portfolio Profit")}
             className="border border-neutral-200 bg-white p-5 rounded flex flex-col justify-between cursor-pointer hover:border-black transition-colors"
           >
@@ -201,7 +235,7 @@ export default function DashboardView({ data, onNavigate }: DashboardViewProps) 
           {modules.map((m) => {
             const Icon = m.icon;
             return (
-              <div 
+              <div
                 key={m.id}
                 onClick={() => onNavigate(m.id)}
                 className="group border border-neutral-200 hover:border-black bg-white p-5 rounded cursor-pointer transition-colors flex items-start gap-4"
@@ -226,14 +260,14 @@ export default function DashboardView({ data, onNavigate }: DashboardViewProps) 
       {selectedKpi && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fade-in">
           <div className="bg-white border border-neutral-200 rounded max-w-4xl w-full max-h-[85vh] flex flex-col shadow-xl text-black">
-            
+
             {/* Modal Header */}
             <div className="p-5 border-b border-neutral-100 flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-bold uppercase tracking-tight">{selectedKpi} Details</h3>
                 <p className="text-xs text-neutral-400">Detailed list and registry data overview</p>
               </div>
-              <button 
+              <button
                 onClick={() => { setSelectedKpi(null); setStatusFilter("All"); }}
                 className="p-1.5 hover:bg-neutral-100 border border-neutral-200 rounded transition-colors text-black cursor-pointer"
               >
@@ -243,7 +277,7 @@ export default function DashboardView({ data, onNavigate }: DashboardViewProps) 
 
             {/* Modal Content */}
             <div className="p-6 overflow-y-auto space-y-6 flex-1 text-xs">
-              
+
               {/* ACTIVE WORKS / TOTAL WORKS / WORKS COMPLETED */}
               {(selectedKpi === "Active Works" || selectedKpi === "Total Works" || selectedKpi === "Works Completed") && (() => {
                 // Determine initial set based on KPI
@@ -260,7 +294,7 @@ export default function DashboardView({ data, onNavigate }: DashboardViewProps) 
                   : entries.filter(e => e.status === statusFilter);
 
                 // Show private works only if not completed KPI and either All or Ongoing filter is selected
-                const showPrivate = (selectedKpi === "Active Works" || selectedKpi === "Total Works") && 
+                const showPrivate = (selectedKpi === "Active Works" || selectedKpi === "Total Works") &&
                   (statusFilter === "All" || statusFilter === "Ongoing");
 
                 return (

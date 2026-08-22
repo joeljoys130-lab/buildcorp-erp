@@ -214,6 +214,7 @@ export interface WorkBasedEntry {
   entryId: string;
   itemSlNo: string;
   itemName: string;
+  subItemDescription?: string | null;
   itemQuantity: number;
   itemRateAsPerEstimate: number;
   totalAmountPerItem: number;

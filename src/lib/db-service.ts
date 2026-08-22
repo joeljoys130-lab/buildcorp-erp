@@ -242,6 +242,9 @@ class DbService {
 
     const parsed = parseDates(data, ['currentStockDate', 'paymentBillDate']);
     delete (parsed as any).purchaseDate;
+    if (parsed.loadInTonne !== undefined && parsed.loadInTonne !== null && parsed.loadInTonne < 0) {
+      throw new Error("Load in Tonne cannot be negative");
+    }
     const balanceAmount = (parsed.amountPerLoad || 0) - (parsed.paidAmount || 0);
 
     const created = await writeDb(() => prisma.cementLoad.create({

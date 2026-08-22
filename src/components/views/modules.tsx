@@ -1,21 +1,137 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
-import { 
-  Plus, Search, FileDown, Edit2, Trash2, Calendar, FileText, CheckCircle, 
+import {
+  Plus, Search, FileDown, Edit2, Trash2, Calendar, FileText, CheckCircle,
   AlertCircle, X, ChevronRight, ChevronDown, ChevronUp, Filter, Printer
 } from "lucide-react";
-import { 
-  CementLoad, Entry, StockRegisterItem, SiteMaterial, 
-  PrivateWork, TarLoad, WorkBasedEntry, Expense 
+import {
+  CementLoad, Entry, StockRegisterItem, SiteMaterial,
+  PrivateWork, TarLoad, WorkBasedEntry, Expense
 } from "@/lib/types";
 import { useToast } from "@/components/ui/toast";
+import { evaluateDlpStatus } from "@/lib/dlp-utils";
+
+// Helper for escaping HTML strings
+const escapeHtml = (str: string): string => {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+};
+
+// Formatted Excel Export for Materials Used In Site
+export const exportMaterialsUsedExcel = (
+  siteMaterials: SiteMaterial[],
+  entries: Entry[],
+  privateWorks: PrivateWork[] = []
+) => {
+  if (!siteMaterials || siteMaterials.length === 0) return;
+  const todayStr = new Date().toLocaleDateString('en-IN', {
+    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+  });
+
+  const getWorkName = (entryId: string) => {
+    const ent = entries.find(e => e.id === entryId);
+    if (ent) return ent.workName;
+    const pw = (privateWorks || []).find(p => p.id === entryId);
+    if (pw) return `${pw.workName} (Private)`;
+    return entryId || "Unlinked Work";
+  };
+
+  const rowsHtml = siteMaterials.map((m, idx) => `
+    <tr style="height:24px; ${idx % 2 === 0 ? 'background-color:#ffffff;' : 'background-color:#f9fafb;'}">
+      <td style="border:1px solid #e5e7eb; padding:6px; text-align:center; font-family:sans-serif; font-size:11px;">${idx + 1}</td>
+      <td style="border:1px solid #e5e7eb; padding:6px; text-align:left; font-family:sans-serif; font-size:11px; font-weight:600;">${escapeHtml(getWorkName(m.entryId))}</td>
+      <td style="border:1px solid #e5e7eb; padding:6px; text-align:center; font-family:sans-serif; font-size:11px;">${m.type === 'delivered' ? 'DELIVERED' : 'TO DELIVER'}</td>
+      <td style="border:1px solid #e5e7eb; padding:6px; text-align:left; font-family:sans-serif; font-size:11px;">${escapeHtml(m.itemSlNo || '-')}</td>
+      <td style="border:1px solid #e5e7eb; padding:6px; text-align:left; font-family:sans-serif; font-size:11px; font-weight:600;">${escapeHtml(m.specName || '-')}</td>
+      <td style="border:1px solid #e5e7eb; padding:6px; text-align:center; font-family:sans-serif; font-size:11px;">${escapeHtml(m.unit || 'cft')}</td>
+      <td style="border:1px solid #e5e7eb; padding:6px; text-align:right; font-family:monospace; font-size:11px; mso-number-format:'#,##0.00';">${m.estimatedQuantity ? Number(m.estimatedQuantity).toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '0.00'}</td>
+      <td style="border:1px solid #e5e7eb; padding:6px; text-align:right; font-family:monospace; font-size:11px; mso-number-format:'#,##0.00';">${m.deliveredQuantityInCft ? Number(m.deliveredQuantityInCft).toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '0.00'}</td>
+      <td style="border:1px solid #e5e7eb; padding:6px; text-align:right; font-family:monospace; font-size:11px; mso-number-format:'#,##0.00';">${((m.estimatedQuantity || 0) - (m.deliveredQuantityInCft || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+      <td style="border:1px solid #e5e7eb; padding:6px; text-align:center; font-family:sans-serif; font-size:11px;">${m.createdAt ? new Date(m.createdAt).toISOString().substring(0, 10) : '-'}</td>
+    </tr>
+  `).join('');
+
+  const excelContent = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+    <head>
+      <meta charset="utf-8" />
+      <!--[if gte mso 9]>
+      <xml>
+        <x:ExcelWorkbook>
+          <x:ExcelWorksheets>
+            <x:ExcelWorksheet>
+              <x:Name>Total Materials Used In Site</x:Name>
+              <x:WorksheetOptions>
+                <x:FreezePanes/>
+                <x:FrozenNoSplit/>
+                <x:SplitHorizontal>5</x:SplitHorizontal>
+                <x:TopRowBottomPane>5</x:TopRowBottomPane>
+                <x:ActivePane>2</x:ActivePane>
+                <x:Panes><x:Pane><x:Number>3</x:Number></x:Pane></x:Panes>
+                <x:ProtectContents>False</x:ProtectContents>
+              </x:WorksheetOptions>
+            </x:ExcelWorksheet>
+          </x:ExcelWorksheets>
+        </x:ExcelWorkbook>
+      </xml>
+      <![endif]-->
+      <style>
+        th { font-weight: bold; }
+        .num { mso-number-format:"\\#\\,\\#\\#0\\.00"; }
+      </style>
+    </head>
+    <body>
+      <table style="border-collapse:collapse; width:100%;">
+        <tr>
+          <td colspan="10" style="font-family:sans-serif; font-size:16px; font-weight:bold; text-align:left; background-color:#000000; color:#ffffff; padding:10px;">
+            TOTAL MATERIALS USED IN SITE
+          </td>
+        </tr>
+        <tr>
+          <td colspan="10" style="font-family:sans-serif; font-size:11px; text-align:left; color:#4b5563; padding:6px; background-color:#f3f4f6;">
+            <strong>Generated Date:</strong> ${todayStr} | <strong>Organization:</strong> BuildCorp ERP | <strong>Total Records:</strong> ${siteMaterials.length}
+          </td>
+        </tr>
+        <tr style="height:10px;"><td colspan="10"></td></tr>
+        <tr style="background-color:#111827; color:#ffffff; font-family:sans-serif; font-size:11px; height:28px;">
+          <th style="border:1px solid #374151; padding:6px; text-align:center; width:40px;">SL NO</th>
+          <th style="border:1px solid #374151; padding:6px; text-align:left; width:220px;">WORK / PROJECT NAME</th>
+          <th style="border:1px solid #374151; padding:6px; text-align:center; width:100px;">RECORD TYPE</th>
+          <th style="border:1px solid #374151; padding:6px; text-align:left; width:80px;">ITEM SL NO</th>
+          <th style="border:1px solid #374151; padding:6px; text-align:left; width:200px;">SPECIFICATION / MATERIAL</th>
+          <th style="border:1px solid #374151; padding:6px; text-align:center; width:60px;">UNIT</th>
+          <th style="border:1px solid #374151; padding:6px; text-align:right; width:130px;">ESTIMATED QTY</th>
+          <th style="border:1px solid #374151; padding:6px; text-align:right; width:130px;">DELIVERED QTY</th>
+          <th style="border:1px solid #374151; padding:6px; text-align:right; width:130px;">BALANCE QTY</th>
+          <th style="border:1px solid #374151; padding:6px; text-align:center; width:100px;">LOGGED DATE</th>
+        </tr>
+        ${rowsHtml}
+      </table>
+    </body>
+    </html>
+  `;
+
+  const blob = new Blob([excelContent], { type: 'application/vnd.ms-excel;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute("download", `Total_Materials_Used_In_Site_${new Date().toISOString().substring(0, 10)}.xls`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
 
 // Common helper for CSV exports
 const exportCSV = (data: any[], filename: string) => {
   if (data.length === 0) return;
   const headers = Object.keys(data[0]).join(",");
-  const rows = data.map(obj => 
+  const rows = data.map(obj =>
     Object.values(obj).map(val => {
       let str = String(val).replace(/"/g, '""');
       return `"${str}"`;
@@ -96,6 +212,7 @@ export function CementLoadView({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [expandedCementLoadId, setExpandedCementLoadId] = useState<string | null>(null);
+  const [isStockUnlocked, setIsStockUnlocked] = useState(false);
 
   // Single form state object
   const [form, setForm] = useState<CementFormState>(CEMENT_FORM_EMPTY);
@@ -115,11 +232,19 @@ export function CementLoadView({
     );
   }, [pendingCementLoads, cementLoads, searchQuery]);
 
-  const clearForm = () => setForm(CEMENT_FORM_EMPTY);
+  const clearForm = () => {
+    setForm(CEMENT_FORM_EMPTY);
+    setIsStockUnlocked(false);
+  };
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (isSaving) return;
+
+    if (form.loadInTonne === undefined || form.loadInTonne === null || isNaN(Number(form.loadInTonne)) || Number(form.loadInTonne) < 0) {
+      toast.error("Invalid Tonne Value", "Load in Tonne must be 0 or greater.");
+      return;
+    }
 
     // Date Rule Validation: Future dates strictly blocked
     const endOfToday = new Date();
@@ -301,27 +426,27 @@ export function CementLoadView({
           <p className="text-xs text-neutral-500">Record purchases, update stock levels, and track remaining balances.</p>
         </div>
         <div className="flex gap-2">
-          <button 
+          <button
             onClick={() => exportCSV(cementLoads, "cement_loads")}
             className="px-3 py-1.5 border border-neutral-300 text-xs font-semibold hover:bg-neutral-100 rounded text-black bg-white cursor-pointer"
           >
             Export Excel
           </button>
-          <button 
+          <button
             onClick={() => window.print()}
             className="px-3 py-1.5 border border-neutral-300 text-xs font-semibold hover:bg-neutral-100 rounded text-black bg-white cursor-pointer"
           >
             Print
           </button>
           {!showForm && (
-            <button 
+            <button
               onClick={() => { clearForm(); setEditingId(null); setShowForm(true); }}
               className="px-3 py-1.5 bg-black text-white hover:bg-neutral-800 text-xs font-semibold rounded cursor-pointer"
             >
               Add Cement Load
             </button>
           )}
-          <button 
+          <button
             onClick={() => onNavigate("dashboard")}
             className="px-3 py-1.5 border border-neutral-300 text-xs font-semibold hover:bg-neutral-100 rounded text-black bg-white cursor-pointer"
           >
@@ -355,12 +480,12 @@ export function CementLoadView({
           <h3 className="text-xs font-bold uppercase tracking-wider text-black border-b border-neutral-200 pb-2">
             {editingId ? "Update Cement Load" : "New Cement Load Details"}
           </h3>
-          
+
           {/* Main Load Details */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Purchased From</label>
-              <input 
+              <input
                 type="text" required value={form.purchasedFrom} onChange={(e) => setField("purchasedFrom", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 placeholder="Vendor Name"
@@ -368,7 +493,7 @@ export function CementLoadView({
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Cement Company</label>
-              <input 
+              <input
                 type="text" required value={form.cementCompany} onChange={(e) => setField("cementCompany", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 placeholder="e.g. UltraTech, ACC"
@@ -376,7 +501,7 @@ export function CementLoadView({
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Purchased Date</label>
-              <input 
+              <input
                 type="date" required max={todayStr} value={form.purchaseDate} onChange={(e) => setField("purchaseDate", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
               />
@@ -384,21 +509,21 @@ export function CementLoadView({
 
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Load In Tonne</label>
-              <input 
-                type="number" step="any" required value={form.loadInTonne === 0 ? "" : form.loadInTonne} onChange={(e) => setField("loadInTonne", e.target.value === "" ? 0 : Number(e.target.value))}
+              <input
+                type="number" step="any" min="0" required value={form.loadInTonne === undefined || form.loadInTonne === null ? "" : String(form.loadInTonne)} onChange={(e) => setField("loadInTonne", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Load In No. Of Pack</label>
-              <input 
+              <input
                 type="number" required value={form.loadInBags === 0 ? "" : form.loadInBags} onChange={(e) => setField("loadInBags", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Billing Name/Buyer</label>
-              <input 
+              <input
                 type="text" required value={form.buyerName} onChange={(e) => setField("buyerName", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 placeholder="Buyer Name"
@@ -406,7 +531,7 @@ export function CementLoadView({
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Invoice Number</label>
-              <input 
+              <input
                 type="text" required value={form.invoiceNumber} onChange={(e) => setField("invoiceNumber", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 placeholder="Invoice Number"
@@ -414,14 +539,14 @@ export function CementLoadView({
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Amount Per Load</label>
-              <input 
+              <input
                 type="number" required value={form.amountPerLoad === 0 ? "" : form.amountPerLoad} onChange={(e) => setField("amountPerLoad", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Paid Amount</label>
-              <input 
+              <input
                 type="number" required value={form.paidAmount === 0 ? "" : form.paidAmount} onChange={(e) => setField("paidAmount", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
               />
@@ -434,7 +559,7 @@ export function CementLoadView({
             </div>
             <div className="col-span-1 md:col-span-3">
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Remarks</label>
-              <textarea 
+              <textarea
                 rows={2} value={form.remarks} onChange={(e) => setField("remarks", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 placeholder="Additional notes"
@@ -444,27 +569,57 @@ export function CementLoadView({
 
           {/* Current Stock Available Section */}
           <div className="border-t border-neutral-200 pt-4 space-y-4">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-black">Current Stock Available</h4>
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-black">Current Stock Available</h4>
+              {!isStockUnlocked ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsStockUnlocked(true);
+                    toast.info("Stock fields unlocked", "Current Stock Available fields are now editable.");
+                  }}
+                  className="px-2.5 py-1 bg-black text-white hover:bg-neutral-800 rounded text-[10px] font-bold cursor-pointer"
+                >
+                  Edit Stock Fields
+                </button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] bg-green-100 text-green-800 px-2 py-0.5 rounded font-bold border border-green-300">
+                    ✓ Stock Fields Editable
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsStockUnlocked(false);
+                      toast.info("Stock fields locked", "Returned to read-only state.");
+                    }}
+                    className="px-2 py-0.5 border border-neutral-300 text-neutral-700 hover:bg-neutral-100 rounded text-[10px] font-bold cursor-pointer bg-white"
+                  >
+                    Lock Stock
+                  </button>
+                </div>
+              )}
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Current Date</label>
-                <input 
-                  type="date" max={todayStr} value={form.currentStockDate} onChange={(e) => setField("currentStockDate", e.target.value)}
-                  className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
+                <input
+                  type="date" max={todayStr} disabled={!isStockUnlocked} value={form.currentStockDate} onChange={(e) => setField("currentStockDate", e.target.value)}
+                  className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white disabled:bg-neutral-100 disabled:text-neutral-500 disabled:cursor-not-allowed"
                 />
               </div>
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Stock</label>
-                <input 
-                  type="number" value={form.currentStockQty === 0 ? "" : form.currentStockQty} onChange={(e) => setField("currentStockQty", e.target.value === "" ? 0 : Number(e.target.value))}
-                  className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
+                <input
+                  type="number" disabled={!isStockUnlocked} value={form.currentStockQty === 0 ? "0" : form.currentStockQty} onChange={(e) => setField("currentStockQty", e.target.value === "" ? 0 : Number(e.target.value))}
+                  className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white disabled:bg-neutral-100 disabled:text-neutral-500 disabled:cursor-not-allowed"
                 />
               </div>
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Used</label>
-                <input 
-                  type="number" value={form.currentStockUsed === 0 ? "" : form.currentStockUsed} onChange={(e) => setField("currentStockUsed", e.target.value === "" ? 0 : Number(e.target.value))}
-                  className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
+                <input
+                  type="number" disabled={!isStockUnlocked} value={form.currentStockUsed === 0 ? "0" : form.currentStockUsed} onChange={(e) => setField("currentStockUsed", e.target.value === "" ? 0 : Number(e.target.value))}
+                  className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white disabled:bg-neutral-100 disabled:text-neutral-500 disabled:cursor-not-allowed"
                 />
               </div>
               <div>
@@ -475,16 +630,16 @@ export function CementLoadView({
               </div>
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">U Amount</label>
-                <input 
-                  type="number" value={form.currentStockUsedAmount === 0 ? "" : form.currentStockUsedAmount} onChange={(e) => setField("currentStockUsedAmount", e.target.value === "" ? 0 : Number(e.target.value))}
-                  className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
+                <input
+                  type="number" disabled={!isStockUnlocked} value={form.currentStockUsedAmount === 0 ? "0" : form.currentStockUsedAmount} onChange={(e) => setField("currentStockUsedAmount", e.target.value === "" ? 0 : Number(e.target.value))}
+                  className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white disabled:bg-neutral-100 disabled:text-neutral-500 disabled:cursor-not-allowed"
                 />
               </div>
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Bal Amount</label>
-                <input 
-                  type="number" value={form.currentStockBalanceAmount === 0 ? "" : form.currentStockBalanceAmount} onChange={(e) => setField("currentStockBalanceAmount", e.target.value === "" ? 0 : Number(e.target.value))}
-                  className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
+                <input
+                  type="number" disabled={!isStockUnlocked} value={form.currentStockBalanceAmount === 0 ? "0" : form.currentStockBalanceAmount} onChange={(e) => setField("currentStockBalanceAmount", e.target.value === "" ? 0 : Number(e.target.value))}
+                  className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white disabled:bg-neutral-100 disabled:text-neutral-500 disabled:cursor-not-allowed"
                 />
               </div>
             </div>
@@ -496,7 +651,7 @@ export function CementLoadView({
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Party Name</label>
-                <input 
+                <input
                   type="text" value={form.paymentPartyName} onChange={(e) => setField("paymentPartyName", e.target.value)}
                   className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                   placeholder="Party Name"
@@ -504,21 +659,21 @@ export function CementLoadView({
               </div>
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Bill Amount</label>
-                <input 
+                <input
                   type="number" value={form.paymentBillAmount === 0 ? "" : form.paymentBillAmount} onChange={(e) => setField("paymentBillAmount", e.target.value === "" ? 0 : Number(e.target.value))}
                   className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
                 />
               </div>
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Bill Date</label>
-                <input 
+                <input
                   type="date" max={todayStr} value={form.paymentBillDate} onChange={(e) => setField("paymentBillDate", e.target.value)}
                   className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 />
               </div>
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Paid Amount</label>
-                <input 
+                <input
                   type="number" value={form.paymentPaidAmount === 0 ? "" : form.paymentPaidAmount} onChange={(e) => setField("paymentPaidAmount", e.target.value === "" ? 0 : Number(e.target.value))}
                   className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
                 />
@@ -531,7 +686,7 @@ export function CementLoadView({
               </div>
               <div>
                 <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Remarks</label>
-                <input 
+                <input
                   type="text" value={form.paymentRemarks} onChange={(e) => setField("paymentRemarks", e.target.value)}
                   className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                   placeholder="Payment remarks"
@@ -543,27 +698,27 @@ export function CementLoadView({
           {/* Action buttons on every page: Edit, Save, Clear, Update, Cancel, Back */}
           <div className="flex gap-2 justify-end border-t border-neutral-200 pt-3">
             {editingId && (
-              <button 
+              <button
                 type="button" onClick={() => { const item = displayedCementLoads.find(c => c.id === editingId); if (item) handleEdit(item); }}
                 className="px-3 py-1.5 border border-neutral-300 hover:bg-neutral-100 text-xs font-semibold rounded text-black bg-white cursor-pointer"
               >
                 Edit
               </button>
             )}
-            <button 
+            <button
               type="submit"
               disabled={isSaving}
               className="px-3 py-1.5 bg-black text-white hover:bg-neutral-800 text-xs font-semibold rounded cursor-pointer disabled:opacity-50"
             >
               {isSaving ? "Saving..." : editingId ? "Update" : "Save"}
             </button>
-            <button 
+            <button
               type="button" onClick={clearForm}
               className="px-3 py-1.5 border border-neutral-300 hover:bg-neutral-100 text-xs font-semibold rounded text-black bg-white cursor-pointer"
             >
               Clear
             </button>
-            <button 
+            <button
               type="button" onClick={() => { setShowForm(false); setEditingId(null); }}
               className="px-3 py-1.5 border border-neutral-300 hover:bg-neutral-100 text-xs font-semibold rounded text-black bg-white cursor-pointer"
             >
@@ -578,7 +733,7 @@ export function CementLoadView({
         <div className="p-4 border-b border-neutral-100 flex items-center justify-between">
           <div className="relative w-64">
             <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-neutral-400" />
-            <input 
+            <input
               type="text" placeholder="Search party or brand..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-8 pr-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
             />
@@ -606,7 +761,7 @@ export function CementLoadView({
                 const isExpanded = expandedCementLoadId === load.id;
                 return (
                   <React.Fragment key={load.id}>
-                    <tr 
+                    <tr
                       onClick={() => setExpandedCementLoadId(prev => (prev === load.id ? null : load.id))}
                       className={`hover:bg-neutral-50 cursor-pointer transition-colors ${isExpanded ? "bg-neutral-50/80 font-medium" : ""}`}
                     >
@@ -620,28 +775,28 @@ export function CementLoadView({
                       <td className="p-3 text-right font-mono font-bold text-black">₹{(load.balanceAmount ?? (load.amountPerLoad - load.paidAmount)).toLocaleString()}</td>
                       <td className="p-3 text-right">
                         <div className="flex gap-1.5 justify-end items-center" onClick={(e) => e.stopPropagation()}>
-                          <button 
+                          <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               setExpandedCementLoadId(prev => (prev === load.id ? null : load.id));
-                            }} 
+                            }}
                             className="px-2 py-1 border border-neutral-300 rounded text-[10px] font-bold text-black hover:bg-neutral-100 flex items-center gap-1 cursor-pointer bg-white"
                             title="View Load Details"
                           >
                             <span>{isExpanded ? "Hide Details" : "Load Details"}</span>
                             {isExpanded ? <ChevronUp className="w-3 h-3 text-neutral-600" /> : <ChevronDown className="w-3 h-3 text-neutral-600" />}
                           </button>
-                          <button 
+                          <button
                             type="button"
-                            onClick={(e) => handleEdit(load, e)} 
+                            onClick={(e) => handleEdit(load, e)}
                             className="px-2 py-1 border border-neutral-300 rounded text-[10px] font-bold text-black hover:bg-neutral-100 cursor-pointer bg-white"
                           >
                             Edit
                           </button>
-                          <button 
+                          <button
                             type="button"
-                            onClick={(e) => handleDelete(load.id, e)} 
+                            onClick={(e) => handleDelete(load.id, e)}
                             className="px-2 py-1 border border-neutral-300 rounded text-[10px] font-bold text-black hover:bg-neutral-100 cursor-pointer bg-white"
                           >
                             Delete
@@ -806,6 +961,7 @@ const ENTRY_FORM_EMPTY = {
   agreementNo: "",
   siteHandoverDate: "",
   workCompletionDateAsPerAgreement: "",
+  actualCompletionDate: "",
   wardMemberName: "",
   wardMemberPhone: "",
   overseerName: "",
@@ -839,6 +995,7 @@ export function EntryView({
   onNavigate: (tab: string) => void;
 }) {
   const toast = useToast();
+  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -867,6 +1024,12 @@ export function EntryView({
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (isSaving) return;
+
+    if (form.actualCompletionDate && form.actualCompletionDate > todayStr) {
+      toast.error("Future dates not allowed", "Actual Date of Completion cannot be in the future.");
+      return;
+    }
+
     setIsSaving(true);
 
     const payload = {
@@ -884,6 +1047,7 @@ export function EntryView({
       agreementNo: form.agreementNo,
       siteHandoverDate: form.siteHandoverDate,
       workCompletionDateAsPerAgreement: form.workCompletionDateAsPerAgreement,
+      actualCompletionDate: form.actualCompletionDate || null,
       wardMemberName: form.wardMemberName || "",
       wardMemberPhone: form.wardMemberPhone || "",
       overseerName: form.overseerName || "",
@@ -933,9 +1097,7 @@ export function EntryView({
         } else {
           const saved = await onCreateEntry(payload);
           if (saved && saved.id) {
-            // 1. Add authoritative server record to parent state
             onOptimisticUpdate?.(saved as unknown as Entry);
-            // 2. Remove temporary record from local pending array
             setPendingEntries(prev => prev.filter(item => item.id !== capturedOptimisticId));
             toast.success("Project Entry saved successfully.");
           } else {
@@ -972,6 +1134,7 @@ export function EntryView({
       agreementNo: entry.agreementNo,
       siteHandoverDate: formatDate(entry.siteHandoverDate),
       workCompletionDateAsPerAgreement: formatDate(entry.workCompletionDateAsPerAgreement),
+      actualCompletionDate: entry.actualCompletionDate ? formatDate(entry.actualCompletionDate) : "",
       wardMemberName: entry.wardMemberName || "",
       wardMemberPhone: entry.wardMemberPhone || "",
       overseerName: entry.overseerName || "",
@@ -1006,7 +1169,7 @@ export function EntryView({
     }
   };
 
-  const filteredEntries = entries.filter(e => 
+  const filteredEntries = entries.filter(e =>
     e.workName.toLowerCase().includes(searchQuery.toLowerCase()) ||
     e.agreementNo.toLowerCase().includes(searchQuery.toLowerCase()) ||
     e.nameOfOffice.toLowerCase().includes(searchQuery.toLowerCase())
@@ -1020,27 +1183,27 @@ export function EntryView({
           <p className="text-xs text-neutral-500">Record work details, agreements, SLA specifications, and handover timelines.</p>
         </div>
         <div className="flex gap-2">
-          <button 
+          <button
             onClick={() => exportCSV(entries, "work_entries")}
             className="px-3 py-1.5 border border-neutral-300 text-xs font-semibold hover:bg-neutral-100 rounded text-black bg-white cursor-pointer"
           >
             Export Excel
           </button>
-          <button 
+          <button
             onClick={() => window.print()}
             className="px-3 py-1.5 border border-neutral-300 text-xs font-semibold hover:bg-neutral-100 rounded text-black bg-white cursor-pointer"
           >
             Print
           </button>
           {!showForm && (
-            <button 
+            <button
               onClick={() => { clearForm(); setEditingId(null); setShowForm(true); }}
               className="px-3 py-1.5 bg-black text-white hover:bg-neutral-800 text-xs font-semibold rounded cursor-pointer"
             >
               Add Entry
             </button>
           )}
-          <button 
+          <button
             onClick={() => onNavigate("dashboard")}
             className="px-3 py-1.5 border border-neutral-300 text-xs font-semibold hover:bg-neutral-100 rounded text-black bg-white cursor-pointer"
           >
@@ -1057,7 +1220,7 @@ export function EntryView({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Work Name</label>
-              <input 
+              <input
                 type="text" required value={form.workName} onChange={(e) => setField("workName", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 placeholder="Full title of the project"
@@ -1065,14 +1228,14 @@ export function EntryView({
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Amount (Without GST)</label>
-              <input 
+              <input
                 type="number" required value={form.amount === 0 ? "" : form.amount} onChange={(e) => setField("amount", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Name Of Office</label>
-              <input 
+              <input
                 type="text" required value={form.nameOfOffice} onChange={(e) => setField("nameOfOffice", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 placeholder="e.g. NHAI Regional Office, PWD"
@@ -1080,7 +1243,7 @@ export function EntryView({
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">MLA/MP Name (Optional)</label>
-              <input 
+              <input
                 type="text" value={form.mlaMpName} onChange={(e) => setField("mlaMpName", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 placeholder="Constituency details"
@@ -1088,7 +1251,7 @@ export function EntryView({
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">LOA Received</label>
-              <select 
+              <select
                 value={form.loaReceived ? "true" : "false"} onChange={(e) => setField("loaReceived", e.target.value === "true")}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
               >
@@ -1098,7 +1261,7 @@ export function EntryView({
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">GST Applicable (18%)</label>
-              <select 
+              <select
                 value={form.gstApplicable ? "true" : "false"} onChange={(e) => setField("gstApplicable", e.target.value === "true")}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
               >
@@ -1108,35 +1271,35 @@ export function EntryView({
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Last Date To Execute Agreement</label>
-              <input 
+              <input
                 type="date" required value={form.lastDateToExecuteAgreement} onChange={(e) => setField("lastDateToExecuteAgreement", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Amount Of Stamp Paper Required</label>
-              <input 
+              <input
                 type="number" required value={form.amountOfStampPaperRequired === 0 ? "" : form.amountOfStampPaperRequired} onChange={(e) => setField("amountOfStampPaperRequired", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Security Amount</label>
-              <input 
+              <input
                 type="number" required value={form.securityAmount === 0 ? "" : form.securityAmount} onChange={(e) => setField("securityAmount", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Performance Guarantee (If Applicable)</label>
-              <input 
+              <input
                 type="number" value={form.performanceGuarantee === 0 ? "" : form.performanceGuarantee} onChange={(e) => setField("performanceGuarantee", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">DLP Period As Per In LOA</label>
-              <input 
+              <input
                 type="text" required value={form.dlpPeriodAsPerInLOA} onChange={(e) => setField("dlpPeriodAsPerInLOA", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 placeholder="e.g. 24 Months, 3 Years"
@@ -1144,7 +1307,7 @@ export function EntryView({
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Agreement No</label>
-              <input 
+              <input
                 type="text" required value={form.agreementNo} onChange={(e) => setField("agreementNo", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
                 placeholder="AGR-..."
@@ -1192,15 +1355,22 @@ export function EntryView({
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Site Handover Date</label>
-              <input 
+              <input
                 type="date" required value={form.siteHandoverDate} onChange={(e) => setField("siteHandoverDate", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Work Completion Date As Per Agreement</label>
-              <input 
+              <input
                 type="date" required value={form.workCompletionDateAsPerAgreement} onChange={(e) => setField("workCompletionDateAsPerAgreement", e.target.value)}
+                className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Actual Date of Completion</label>
+              <input
+                type="date" max={todayStr} value={form.actualCompletionDate} onChange={(e) => setField("actualCompletionDate", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
               />
             </div>
@@ -1208,27 +1378,27 @@ export function EntryView({
 
           <div className="flex gap-2 justify-end border-t border-neutral-200 pt-3">
             {editingId && (
-              <button 
+              <button
                 type="button" onClick={() => handleEdit(displayedEntries.find(e => e.id === editingId)!)}
                 className="px-3 py-1.5 border border-neutral-300 hover:bg-neutral-100 text-xs font-semibold rounded text-black bg-white cursor-pointer"
               >
                 Edit
               </button>
             )}
-            <button 
+            <button
               type="submit"
               disabled={isSaving}
               className="px-3 py-1.5 bg-black text-white hover:bg-neutral-850 text-xs font-semibold rounded cursor-pointer disabled:opacity-50"
             >
               {isSaving ? "Saving..." : editingId ? "Update" : "Save"}
             </button>
-            <button 
+            <button
               type="button" onClick={clearForm}
               className="px-3 py-1.5 border border-neutral-300 hover:bg-neutral-100 text-xs font-semibold rounded text-black bg-white cursor-pointer"
             >
               Clear
             </button>
-            <button 
+            <button
               type="button" onClick={() => { setShowForm(false); setEditingId(null); }}
               className="px-3 py-1.5 border border-neutral-300 hover:bg-neutral-100 text-xs font-semibold rounded text-black bg-white cursor-pointer"
             >
@@ -1243,7 +1413,7 @@ export function EntryView({
         <div className="p-4 border-b border-neutral-100 flex items-center justify-between">
           <div className="relative w-64">
             <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-neutral-400" />
-            <input 
+            <input
               type="text" placeholder="Search work title or agreement..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-8 pr-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
             />
@@ -1270,7 +1440,7 @@ export function EntryView({
                 const isExpanded = expandedEntryId === e.id;
                 return (
                   <React.Fragment key={e.id}>
-                    <tr 
+                    <tr
                       tabIndex={0}
                       aria-expanded={isExpanded}
                       onClick={() => setExpandedEntryId(prev => (prev === e.id ? null : e.id))}
@@ -1299,22 +1469,22 @@ export function EntryView({
                       </td>
                       <td className="p-3 text-right">
                         <div className="flex gap-2 justify-end" onClick={(evt) => evt.stopPropagation()}>
-                          <button 
+                          <button
                             type="button"
                             onClick={(evt) => {
                               evt.stopPropagation();
                               handleEdit(e);
-                            }} 
+                            }}
                             className="px-2 py-1 border border-neutral-300 rounded text-[10px] font-bold text-black hover:bg-neutral-100 cursor-pointer bg-white"
                           >
                             Edit
                           </button>
-                          <button 
+                          <button
                             type="button"
                             onClick={(evt) => {
                               evt.stopPropagation();
                               handleDelete(e.id);
-                            }} 
+                            }}
                             className="px-2 py-1 border border-neutral-300 rounded text-[10px] font-bold text-black hover:bg-neutral-100 cursor-pointer bg-white"
                           >
                             Delete
@@ -1402,10 +1572,10 @@ export function EntryView({
                               </div>
                             </div>
 
-                            {/* Timelines */}
+                            {/* Timelines & DLP */}
                             <div>
-                              <h5 className="text-[10px] font-bold uppercase tracking-wider text-black border-b border-neutral-100 pb-1 mb-3">Execution Timelines</h5>
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                              <h5 className="text-[10px] font-bold uppercase tracking-wider text-black border-b border-neutral-100 pb-1 mb-3">Execution Timelines & DLP Status</h5>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
                                 <div>
                                   <span className="block text-[10px] font-bold text-neutral-400 uppercase">Last Date to Execute Agreement</span>
                                   <span className="font-mono font-semibold text-black">{formatDate(e.lastDateToExecuteAgreement)}</span>
@@ -1418,7 +1588,33 @@ export function EntryView({
                                   <span className="block text-[10px] font-bold text-neutral-400 uppercase">Contract Completion Date</span>
                                   <span className="font-mono font-semibold text-black">{formatDate(e.workCompletionDateAsPerAgreement)}</span>
                                 </div>
+                                <div>
+                                  <span className="block text-[10px] font-bold text-neutral-400 uppercase">Actual Completion Date</span>
+                                  <span className="font-mono font-bold text-black">{e.actualCompletionDate ? formatDate(e.actualCompletionDate) : "Not Completed"}</span>
+                                </div>
                               </div>
+
+                              {(() => {
+                                const dlpInfo = evaluateDlpStatus(e);
+                                if (!dlpInfo) return null;
+                                let badgeClass = "bg-black text-white";
+                                if (dlpInfo.isExpired) badgeClass = "bg-red-600 text-white font-bold animate-pulse";
+                                else if (dlpInfo.isExpiringSoon) badgeClass = "bg-yellow-500 text-white font-bold";
+
+                                return (
+                                  <div className="mt-3 p-3 border border-neutral-200 bg-neutral-50 rounded flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                    <div className="space-y-0.5">
+                                      <span className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 block">DLP Expiry Calculation (Actual Completion + DLP Period)</span>
+                                      <div className="text-xs font-semibold text-black">
+                                        Actual Completion: <span className="font-mono">{formatDate(dlpInfo.actualCompletionDate)}</span> + DLP Period: <span className="font-bold">{dlpInfo.dlpPeriod}</span> = Expiry Date: <span className="font-mono font-bold">{formatDate(dlpInfo.dlpExpiryDate)}</span>
+                                      </div>
+                                    </div>
+                                    <span className={`px-2.5 py-1 rounded text-xs font-mono uppercase tracking-wider ${badgeClass}`}>
+                                      {dlpInfo.status}
+                                    </span>
+                                  </div>
+                                );
+                              })()}
                             </div>
 
                             {/* Department Contacts */}
@@ -1468,7 +1664,7 @@ export function EntryView({
           </table>
         </div>
       </div>
-      
+
       {/* Detail Modal */}
       {selectedEntry && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-xs">
@@ -1478,14 +1674,14 @@ export function EntryView({
                 <span className="text-[10px] uppercase font-bold text-neutral-400 tracking-wider">Project details</span>
                 <h3 className="text-sm font-bold text-black uppercase mt-0.5">{selectedEntry.workName}</h3>
               </div>
-              <button 
-                onClick={() => setSelectedEntry(null)} 
+              <button
+                onClick={() => setSelectedEntry(null)}
                 className="p-1 hover:bg-neutral-200 rounded text-neutral-500 hover:text-black cursor-pointer bg-transparent border-none"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
+
             <div className="p-6 overflow-y-auto space-y-6 text-xs text-neutral-700 text-left">
               {/* Project General details */}
               <div>
@@ -1606,13 +1802,13 @@ export function EntryView({
             </div>
 
             <div className="p-4 border-t border-neutral-200 bg-neutral-50 flex justify-end gap-2">
-              <button 
+              <button
                 onClick={() => { handleEdit(selectedEntry); setSelectedEntry(null); }}
                 className="px-3 py-1.5 bg-black text-white hover:bg-neutral-800 text-xs font-semibold rounded cursor-pointer"
               >
                 Edit Details
               </button>
-              <button 
+              <button
                 onClick={() => setSelectedEntry(null)}
                 className="px-3 py-1.5 border border-neutral-300 hover:bg-neutral-100 text-xs font-semibold rounded text-black bg-white cursor-pointer"
               >
@@ -1705,7 +1901,7 @@ export function StockRegisterView({
     setUsedInTonne(0);
   };
 
-  const filteredItems = stockItems.filter(item => 
+  const filteredItems = stockItems.filter(item =>
     item.materialName.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -1717,19 +1913,19 @@ export function StockRegisterView({
           <p className="text-xs text-neutral-500">Real-time inventory levels of raw building material aggregates.</p>
         </div>
         <div className="flex gap-2">
-          <button 
+          <button
             onClick={() => exportCSV(stockItems, "stock_register")}
             className="px-3 py-1.5 border border-neutral-300 text-xs font-semibold hover:bg-neutral-100 rounded text-black bg-white cursor-pointer"
           >
             Export Excel
           </button>
-          <button 
+          <button
             onClick={() => window.print()}
             className="px-3 py-1.5 border border-neutral-300 text-xs font-semibold hover:bg-neutral-100 rounded text-black bg-white cursor-pointer"
           >
             Print
           </button>
-          <button 
+          <button
             onClick={() => onNavigate("dashboard")}
             className="px-3 py-1.5 border border-neutral-300 text-xs font-semibold hover:bg-neutral-100 rounded text-black bg-white cursor-pointer"
           >
@@ -1747,7 +1943,7 @@ export function StockRegisterView({
           else if (item.materialName === "RS1") borderColor = "#f59e0b";
           else if (item.materialName === "SS1") borderColor = "#10b981";
           else if (item.materialName === "VG30") borderColor = "#4f46e5";
-          
+
           return (
             <div key={item.id} style={{ borderLeftColor: borderColor }} className="border border-neutral-200 border-l-4 bg-white p-4 rounded shadow-sm hover:shadow-md transition-all duration-200">
               <div className="text-[10px] uppercase font-bold text-neutral-400">{item.materialName} Balance</div>
@@ -1770,7 +1966,7 @@ export function StockRegisterView({
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">In Barrel</label>
-              <input 
+              <input
                 type="number" required value={inBarrel === 0 ? "" : inBarrel} onChange={(e) => setInBarrel(e.target.value === "" ? 0 : Number(e.target.value))}
                 disabled={materialName === "Cement"}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white disabled:bg-neutral-100 disabled:cursor-not-allowed"
@@ -1778,21 +1974,21 @@ export function StockRegisterView({
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">In KG</label>
-              <input 
+              <input
                 type="number" required value={inKg === 0 ? "" : inKg} onChange={(e) => setInKg(e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">In Tonne</label>
-              <input 
+              <input
                 type="number" required value={inTonne === 0 ? "" : inTonne} onChange={(e) => setInTonne(e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Used In Tonne</label>
-              <input 
+              <input
                 type="number" required value={usedInTonne === 0 ? "" : usedInTonne} onChange={(e) => setUsedInTonne(e.target.value === "" ? 0 : Number(e.target.value))}
                 disabled={materialName === "Cement"}
                 className="w-full px-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black font-mono text-black bg-white disabled:bg-neutral-100 disabled:cursor-not-allowed"
@@ -1801,32 +1997,32 @@ export function StockRegisterView({
           </div>
 
           <div className="flex gap-2 justify-end border-t border-neutral-200 pt-3">
-            <button 
+            <button
               type="button" onClick={() => handleEdit(stockItems.find(s => s.id === editingId)!)}
               className="px-3 py-1.5 border border-neutral-300 hover:bg-neutral-100 text-xs font-semibold rounded text-black bg-white cursor-pointer"
             >
               Edit
             </button>
-            <button 
+            <button
               type="submit"
               disabled={isSaving}
               className="px-3 py-1.5 bg-black text-white hover:bg-neutral-850 text-xs font-semibold rounded cursor-pointer disabled:opacity-50"
             >
               {isSaving ? "Saving..." : "Update"}
             </button>
-            <button 
+            <button
               type="button" onClick={clearForm}
               className="px-3 py-1.5 border border-neutral-300 hover:bg-neutral-100 text-xs font-semibold rounded text-black bg-white cursor-pointer"
             >
               Clear
             </button>
-            <button 
+            <button
               type="button" onClick={() => setEditingId(null)}
               className="px-3 py-1.5 border border-neutral-300 hover:bg-neutral-100 text-xs font-semibold rounded text-black bg-white cursor-pointer"
             >
               Cancel
             </button>
-            <button 
+            <button
               type="button" onClick={() => setEditingId(null)}
               className="px-3 py-1.5 border border-neutral-300 hover:bg-neutral-100 text-xs font-semibold rounded text-black bg-white cursor-pointer"
             >
@@ -1840,7 +2036,7 @@ export function StockRegisterView({
         <div className="p-4 border-b border-neutral-100 flex items-center justify-between">
           <div className="relative w-64">
             <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-neutral-400" />
-            <input 
+            <input
               type="text" placeholder="Search material..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-8 pr-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
             />
@@ -1929,7 +2125,7 @@ export function MaterialsUsedView({
       ...entries.map(e => ({ id: e.id, name: e.workName })),
       ...(privateWorks || []).map(p => ({ id: p.id, name: p.workName }))
     ];
-    const match = combined.find(opt => 
+    const match = combined.find(opt =>
       opt.name.toLowerCase().includes(query.toLowerCase())
     );
     if (match) {
@@ -2081,7 +2277,7 @@ export function MaterialsUsedView({
 
   // Calculate material balance summary
   const summaryMap: { [key: string]: { estimated: number; delivered: number } } = {};
-  
+
   toDeliverList.forEach(item => {
     const name = item.specName;
     if (!summaryMap[name]) {
@@ -2089,7 +2285,7 @@ export function MaterialsUsedView({
     }
     summaryMap[name].estimated += item.estimatedQuantity;
   });
-  
+
   deliveredList.forEach(item => {
     const name = item.specName;
     if (!summaryMap[name]) {
@@ -2097,7 +2293,7 @@ export function MaterialsUsedView({
     }
     summaryMap[name].delivered += item.deliveredQuantityInCft;
   });
-  
+
   const materialSummary = Object.entries(summaryMap).map(([specName, data]) => ({
     specName,
     estimated: data.estimated,
@@ -2121,7 +2317,7 @@ export function MaterialsUsedView({
       {/* Action Toolbar */}
       <div className="flex gap-2 mb-4">
         <button
-          onClick={() => exportCSV(siteMaterials, "materials_used")}
+          onClick={() => exportMaterialsUsedExcel(siteMaterials, entries, privateWorks)}
           className="px-3 py-1.5 border border-neutral-300 text-xs font-semibold hover:bg-neutral-100 rounded text-black bg-white cursor-pointer"
         >
           Export Excel
@@ -2142,7 +2338,7 @@ export function MaterialsUsedView({
       {/* Search Input */}
       <div className="relative w-64 mb-4">
         <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-neutral-400" />
-        <input 
+        <input
           type="text" placeholder="Search work name..." value={workSearchQuery} onChange={(e) => handleWorkSearch(e.target.value)}
           className="w-full pl-8 pr-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
         />
@@ -2152,7 +2348,7 @@ export function MaterialsUsedView({
       <div className="border border-neutral-200 bg-white p-4 rounded space-y-4">
         <div>
           <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1.5">Select Work Name</label>
-          <select 
+          <select
             value={selectedEntryId} onChange={(e) => setSelectedEntryId(e.target.value)}
             className="w-full md:w-1/2 px-3 py-2 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-semibold text-black bg-white"
           >
@@ -2197,7 +2393,7 @@ export function MaterialsUsedView({
                 if (m.balance > 0) borderColor = "#f59e0b"; // Orange/Amber
                 else if (m.balance === 0) borderColor = "#10b981"; // Green
                 else borderColor = "#ef4444"; // Red
-                
+
                 return (
                   <div key={m.specName} style={{ borderLeftColor: borderColor }} className="border border-neutral-200 border-l-4 bg-neutral-50/50 p-3 rounded shadow-xs hover:shadow-sm transition-all duration-150">
                     <div className="text-[10px] uppercase font-bold text-neutral-400">{m.specName} Balance</div>
@@ -2230,10 +2426,10 @@ export function MaterialsUsedView({
                 </div>
                 <div>
                   <label className="block text-[10px] uppercase font-bold text-neutral-400 mb-1">Spec/Item Name</label>
-                  <select 
-                    required 
-                    value={specName} 
-                    onChange={(e) => setSpecName(e.target.value)} 
+                  <select
+                    required
+                    value={specName}
+                    onChange={(e) => setSpecName(e.target.value)}
                     className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs text-black bg-white focus:outline-none focus:border-black"
                   >
                     <option value="">-- Choose Item --</option>
@@ -2254,8 +2450,8 @@ export function MaterialsUsedView({
                 </div>
                 <div>
                   <label className="block text-[10px] uppercase font-bold text-neutral-400 mb-1">Select Unit</label>
-                  <select 
-                    value={unit} 
+                  <select
+                    value={unit}
                     onChange={(e) => {
                       setUnit(e.target.value);
                       setQtyInCum("");
@@ -2275,11 +2471,11 @@ export function MaterialsUsedView({
                 {unit === "cum" && (
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-neutral-400 mb-1">Quantity in CUM</label>
-                    <input 
-                      type="number" 
+                    <input
+                      type="number"
                       step="any"
-                      required 
-                      value={qtyInCum} 
+                      required
+                      value={qtyInCum}
                       onChange={(e) => {
                         const cumVal = e.target.value === "" ? "" : Number(e.target.value);
                         setQtyInCum(cumVal);
@@ -2291,33 +2487,33 @@ export function MaterialsUsedView({
                             setDeliveredQuantity(cftVal);
                           }
                         }
-                      }} 
-                      className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs font-mono text-black bg-white" 
+                      }}
+                      className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs font-mono text-black bg-white"
                     />
                   </div>
                 )}
                 {itemType === 'to_deliver' ? (
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-neutral-400 mb-1">Estimated Quantity {unit === "cum" ? "(Auto-calculated CFT)" : `(${unit})`}</label>
-                    <input 
-                      type="number" 
-                      required 
+                    <input
+                      type="number"
+                      required
                       readOnly={unit === "cum"}
-                      value={estimatedQuantity === 0 ? "" : estimatedQuantity} 
-                      onChange={(e) => setEstimatedQuantity(e.target.value === "" ? 0 : Number(e.target.value))} 
-                      className={`w-full px-3 py-1.5 border border-neutral-200 rounded text-xs font-mono ${unit === "cum" ? "bg-neutral-50 text-neutral-500 cursor-not-allowed" : "text-black bg-white"}`} 
+                      value={estimatedQuantity === 0 ? "" : estimatedQuantity}
+                      onChange={(e) => setEstimatedQuantity(e.target.value === "" ? 0 : Number(e.target.value))}
+                      className={`w-full px-3 py-1.5 border border-neutral-200 rounded text-xs font-mono ${unit === "cum" ? "bg-neutral-50 text-neutral-500 cursor-not-allowed" : "text-black bg-white"}`}
                     />
                   </div>
                 ) : (
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-neutral-400 mb-1">Delivered Qty {unit === "cum" ? "(Auto-calculated CFT)" : `(${unit})`}</label>
-                    <input 
-                      type="number" 
-                      required 
+                    <input
+                      type="number"
+                      required
                       readOnly={unit === "cum"}
-                      value={deliveredQuantity === 0 ? "" : deliveredQuantity} 
-                      onChange={(e) => setDeliveredQuantity(e.target.value === "" ? 0 : Number(e.target.value))} 
-                      className={`w-full px-3 py-1.5 border border-neutral-200 rounded text-xs font-mono ${unit === "cum" ? "bg-neutral-50 text-neutral-500 cursor-not-allowed" : "text-black bg-white"}`} 
+                      value={deliveredQuantity === 0 ? "" : deliveredQuantity}
+                      onChange={(e) => setDeliveredQuantity(e.target.value === "" ? 0 : Number(e.target.value))}
+                      className={`w-full px-3 py-1.5 border border-neutral-200 rounded text-xs font-mono ${unit === "cum" ? "bg-neutral-50 text-neutral-500 cursor-not-allowed" : "text-black bg-white"}`}
                     />
                   </div>
                 )}
@@ -2334,7 +2530,7 @@ export function MaterialsUsedView({
           <div className="border border-neutral-200 bg-white rounded overflow-hidden">
             <div className="bg-neutral-50 p-3 border-b border-neutral-200 flex justify-between items-center">
               <h3 className="font-bold text-xs uppercase text-neutral-800">1. Estimate Quantity</h3>
-              <button 
+              <button
                 onClick={() => { setItemType('to_deliver'); setShowItemForm(true); setItemSlNo((toDeliverList.length + 1).toString()); }}
                 className="px-2 py-1 bg-black text-white hover:bg-neutral-900 text-[10px] font-bold uppercase rounded flex items-center gap-1"
               >
@@ -2360,7 +2556,7 @@ export function MaterialsUsedView({
                     .filter(d => d.specName === item.specName)
                     .reduce((sum, d) => sum + d.deliveredQuantityInCft, 0);
                   const currentBalance = item.estimatedQuantity - actualDelivered;
-                  
+
                   return (
                     <tr key={item.id} className="hover:bg-neutral-50/50">
                       <td className="p-3 font-mono">{item.itemSlNo}</td>
@@ -2411,7 +2607,7 @@ export function MaterialsUsedView({
           <div className="border border-neutral-200 bg-white rounded overflow-hidden">
             <div className="bg-neutral-50 p-3 border-b border-neutral-200 flex justify-between items-center">
               <h3 className="font-bold text-xs uppercase text-neutral-800">2. Actual Quantity delivered in site</h3>
-              <button 
+              <button
                 onClick={() => { setItemType('delivered'); setShowItemForm(true); setItemSlNo((deliveredList.length + 1).toString()); }}
                 className="px-2 py-1 bg-black text-white hover:bg-neutral-900 text-[10px] font-bold uppercase rounded flex items-center gap-1"
               >
@@ -2440,17 +2636,17 @@ export function MaterialsUsedView({
                     .filter(d => d.specName === item.specName)
                     .reduce((sum, d) => sum + d.deliveredQuantityInCft, 0);
                   const overallBalance = totalEstimated - totalDelivered;
-                  
+
                   const isEstimated = toDeliverList.some(est => est.specName === item.specName);
                   const isOverDelivered = isEstimated && totalDelivered > totalEstimated;
-                  
+
                   let rowStyle = {};
                   if (!isEstimated) {
                     rowStyle = { backgroundColor: '#fee2e2', color: '#7f1d1d' };
                   } else if (isOverDelivered) {
                     rowStyle = { backgroundColor: '#ffedd5', color: '#7c2d12' };
                   }
-                  
+
                   return (
                     <tr key={item.id} style={rowStyle} className="hover:bg-neutral-50/50 transition-colors">
                       <td className="p-3 font-mono">{item.itemSlNo}</td>
@@ -2684,7 +2880,7 @@ export function PrivateWorkView({
         </div>
         <div className="flex gap-2">
           {!showForm && (
-            <button 
+            <button
               onClick={() => { clearForm(); setEditingId(null); setShowForm(true); }}
               className="px-3 py-1.5 bg-black text-white hover:bg-neutral-900 text-xs font-semibold rounded"
             >
@@ -2700,28 +2896,28 @@ export function PrivateWorkView({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Work Name</label>
-              <input 
+              <input
                 type="text" required value={form.workName} onChange={(e) => setField("workName", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Approx Amount (₹)</label>
-              <input 
+              <input
                 type="number" required value={form.approxAmount === 0 ? "" : form.approxAmount} onChange={(e) => setField("approxAmount", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-mono"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Location</label>
-              <input 
+              <input
                 type="text" required value={form.location} onChange={(e) => setField("location", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Related To Contract Work (If Any)</label>
-              <input 
+              <input
                 type="text" value={form.relatedToContractWork} onChange={(e) => setField("relatedToContractWork", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
                 placeholder="Link to Government project"
@@ -2729,14 +2925,14 @@ export function PrivateWorkView({
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Site Visit Date</label>
-              <input 
+              <input
                 type="date" required value={form.siteVisitDate} onChange={(e) => setField("siteVisitDate", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Road/Work Nature</label>
-              <input 
+              <input
                 type="text" required value={form.roadWorkNature} onChange={(e) => setField("roadWorkNature", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
                 placeholder="e.g. Asphalting, Tiling"
@@ -2744,21 +2940,21 @@ export function PrivateWorkView({
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Advance Received (₹)</label>
-              <input 
+              <input
                 type="number" value={form.advanceReceived === 0 ? "" : form.advanceReceived} onChange={(e) => setField("advanceReceived", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-mono"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Approx Final Work Amount (₹)</label>
-              <input 
+              <input
                 type="number" required value={form.approxFinalWorkAmount === 0 ? "" : form.approxFinalWorkAmount} onChange={(e) => setField("approxFinalWorkAmount", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-mono"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Payment Received (₹)</label>
-              <input 
+              <input
                 type="number" required value={form.paymentReceived === 0 ? "" : form.paymentReceived} onChange={(e) => setField("paymentReceived", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-mono"
               />
@@ -2771,14 +2967,14 @@ export function PrivateWorkView({
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Completed Date</label>
-              <input 
+              <input
                 type="date" required value={form.completedDate} onChange={(e) => setField("completedDate", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
             </div>
             <div className="col-span-1 md:col-span-3">
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Remarks</label>
-              <textarea 
+              <textarea
                 rows={2} value={form.remarks} onChange={(e) => setField("remarks", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
@@ -2788,8 +2984,8 @@ export function PrivateWorkView({
           <div className="flex gap-2 justify-end border-t border-neutral-100 pt-3">
             <button type="button" onClick={clearForm} className="px-3 py-1.5 border border-neutral-200 hover:bg-neutral-50 text-xs font-semibold rounded">Clear</button>
             <button type="button" onClick={() => { setShowForm(false); setEditingId(null); }} className="px-3 py-1.5 border border-neutral-200 hover:bg-neutral-50 text-xs font-semibold rounded">Cancel</button>
-            <button 
-              type="submit" 
+            <button
+              type="submit"
               disabled={isSaving}
               className="px-3 py-1.5 bg-black text-white hover:bg-neutral-900 text-xs font-semibold rounded disabled:opacity-50"
             >
@@ -2804,7 +3000,7 @@ export function PrivateWorkView({
         <div className="p-4 border-b border-neutral-100 flex items-center justify-between">
           <div className="relative w-64">
             <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-neutral-400" />
-            <input 
+            <input
               type="text" placeholder="Search work title or location..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-8 pr-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
             />
@@ -2831,7 +3027,7 @@ export function PrivateWorkView({
                 const isExpanded = expandedPrivateWorkId === w.id;
                 return (
                   <React.Fragment key={w.id}>
-                    <tr 
+                    <tr
                       tabIndex={0}
                       aria-expanded={isExpanded}
                       onClick={() => setExpandedPrivateWorkId(prev => (prev === w.id ? null : w.id))}
@@ -2857,22 +3053,22 @@ export function PrivateWorkView({
                       <td className="p-3 text-right font-mono">{formatDate(w.completedDate)}</td>
                       <td className="p-3 text-right">
                         <div className="flex gap-2 justify-end" onClick={(evt) => evt.stopPropagation()}>
-                          <button 
+                          <button
                             type="button"
                             onClick={(evt) => {
                               evt.stopPropagation();
                               handleEdit(w);
-                            }} 
+                            }}
                             className="p-1 hover:bg-neutral-100 rounded text-neutral-600 cursor-pointer bg-white border border-neutral-200"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
-                          <button 
+                          <button
                             type="button"
                             onClick={(evt) => {
                               evt.stopPropagation();
                               handleDelete(w.id);
-                            }} 
+                            }}
                             className="p-1 hover:bg-neutral-150 rounded text-neutral-600 cursor-pointer bg-white border border-neutral-200"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -2974,7 +3170,7 @@ export function PrivateWorkView({
           </table>
         </div>
       </div>
-      
+
       {/* Detail Modal */}
       {selectedPrivateWork && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-xs">
@@ -2984,14 +3180,14 @@ export function PrivateWorkView({
                 <span className="text-[10px] uppercase font-bold text-neutral-400 tracking-wider">Private Work details</span>
                 <h3 className="text-sm font-bold text-black uppercase mt-0.5">{selectedPrivateWork.workName}</h3>
               </div>
-              <button 
-                onClick={() => setSelectedPrivateWork(null)} 
+              <button
+                onClick={() => setSelectedPrivateWork(null)}
                 className="p-1 hover:bg-neutral-200 rounded text-neutral-500 hover:text-black cursor-pointer bg-transparent border-none"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
+
             <div className="p-6 overflow-y-auto space-y-6 text-xs text-neutral-700 text-left">
               {/* General details */}
               <div>
@@ -3059,13 +3255,13 @@ export function PrivateWorkView({
             </div>
 
             <div className="p-4 border-t border-neutral-200 bg-neutral-50 flex justify-end gap-2">
-              <button 
+              <button
                 onClick={() => { handleEdit(selectedPrivateWork); setSelectedPrivateWork(null); }}
                 className="px-3 py-1.5 bg-black text-white hover:bg-neutral-800 text-xs font-semibold rounded cursor-pointer"
               >
                 Edit Details
               </button>
-              <button 
+              <button
                 onClick={() => setSelectedPrivateWork(null)}
                 className="px-3 py-1.5 border border-neutral-300 hover:bg-neutral-100 text-xs font-semibold rounded text-black bg-white cursor-pointer"
               >
@@ -3284,7 +3480,7 @@ export function TarLoadView({
         </div>
         <div className="flex gap-2">
           {!showForm && (
-            <button 
+            <button
               onClick={() => { clearForm(); setEditingId(null); setShowForm(true); }}
               className="px-3 py-1.5 bg-black text-white hover:bg-neutral-900 text-xs font-semibold rounded"
             >
@@ -3319,14 +3515,14 @@ export function TarLoadView({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Purchased From</label>
-              <input 
+              <input
                 type="text" required value={form.purchasedFrom} onChange={(e) => setField("purchasedFrom", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Tar Emulsion / Item</label>
-              <select 
+              <select
                 value={form.item} onChange={(e) => setField("item", e.target.value as any)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               >
@@ -3338,42 +3534,42 @@ export function TarLoadView({
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Quantity In KG</label>
-              <input 
+              <input
                 type="number" required value={form.quantityInKg === 0 ? "" : form.quantityInKg} onChange={(e) => setField("quantityInKg", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-mono"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Load In No. Of Pack</label>
-              <input 
+              <input
                 type="number" required value={form.loadInNoOfPack === 0 ? "" : form.loadInNoOfPack} onChange={(e) => setField("loadInNoOfPack", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-mono"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Addressed Office</label>
-              <input 
+              <input
                 type="text" required value={form.addressedOffice} onChange={(e) => setField("addressedOffice", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Purchased Date</label>
-              <input 
+              <input
                 type="date" required value={form.purchasedDate} onChange={(e) => setField("purchasedDate", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Amount Per Load</label>
-              <input 
+              <input
                 type="number" required value={form.amountPerLoad === 0 ? "" : form.amountPerLoad} onChange={(e) => setField("amountPerLoad", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-mono"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Paid Amount</label>
-              <input 
+              <input
                 type="number" required value={form.paidAmount === 0 ? "" : form.paidAmount} onChange={(e) => setField("paidAmount", e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-mono"
               />
@@ -3386,14 +3582,14 @@ export function TarLoadView({
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Billing Name/Buyer</label>
-              <input 
+              <input
                 type="text" required value={form.billingNameBuyer} onChange={(e) => setField("billingNameBuyer", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-semibold"
               />
             </div>
             <div className="col-span-1 md:col-span-2">
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Remarks</label>
-              <textarea 
+              <textarea
                 rows={1} value={form.remarks} onChange={(e) => setField("remarks", e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
@@ -3413,7 +3609,7 @@ export function TarLoadView({
         <div className="p-4 border-b border-neutral-100 flex items-center justify-between">
           <div className="relative w-64">
             <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-neutral-400" />
-            <input 
+            <input
               type="text" placeholder="Search vendor or material..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-8 pr-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
             />
@@ -3440,7 +3636,7 @@ export function TarLoadView({
                 const isExpanded = expandedTarLoadId === load.id;
                 return (
                   <React.Fragment key={load.id}>
-                    <tr 
+                    <tr
                       tabIndex={0}
                       aria-expanded={isExpanded}
                       onClick={() => setExpandedTarLoadId(prev => (prev === load.id ? null : load.id))}
@@ -3462,22 +3658,22 @@ export function TarLoadView({
                       <td className="p-3 text-right font-mono font-bold">₹{((load.amountPerLoad || 0) - load.paidAmount).toLocaleString()}</td>
                       <td className="p-3 text-right">
                         <div className="flex gap-2 justify-end" onClick={(evt) => evt.stopPropagation()}>
-                          <button 
+                          <button
                             type="button"
                             onClick={(evt) => {
                               evt.stopPropagation();
                               handleEdit(load);
-                            }} 
+                            }}
                             className="p-1 hover:bg-neutral-100 rounded text-neutral-600 cursor-pointer bg-white border border-neutral-200"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
-                          <button 
+                          <button
                             type="button"
                             onClick={(evt) => {
                               evt.stopPropagation();
                               handleDelete(load.id);
-                            }} 
+                            }}
                             className="p-1 hover:bg-neutral-150 rounded text-neutral-600 cursor-pointer bg-white border border-neutral-200"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -3612,7 +3808,7 @@ export function WorkBasedEntryView({
       ...entries.map(e => ({ id: e.id, name: e.workName })),
       ...(privateWorks || []).map(p => ({ id: p.id, name: p.workName }))
     ];
-    const match = combined.find(opt => 
+    const match = combined.find(opt =>
       opt.name.toLowerCase().includes(query.toLowerCase())
     );
     if (match) {
@@ -3625,6 +3821,7 @@ export function WorkBasedEntryView({
   // States
   const [itemSlNo, setItemSlNo] = useState("");
   const [itemName, setItemName] = useState("");
+  const [subItemDescription, setSubItemDescription] = useState("");
   const [itemQuantity, setItemQuantity] = useState(0);
   const [itemRateAsPerEstimate, setItemRateAsPerEstimate] = useState(0);
   const [itemUnit, setItemUnit] = useState("CUM");
@@ -3632,6 +3829,7 @@ export function WorkBasedEntryView({
   const clearForm = () => {
     setItemSlNo("");
     setItemName("");
+    setSubItemDescription("");
     setItemQuantity(0);
     setItemRateAsPerEstimate(0);
     setItemUnit("CUM");
@@ -3646,6 +3844,7 @@ export function WorkBasedEntryView({
       entryId: selectedEntryId,
       itemSlNo,
       itemName,
+      subItemDescription: subItemDescription.trim() || null,
       itemQuantity: Number(itemQuantity),
       itemRateAsPerEstimate: Number(itemRateAsPerEstimate),
       itemUnit
@@ -3707,6 +3906,7 @@ export function WorkBasedEntryView({
     setEditingId(wbe.id);
     setItemSlNo(wbe.itemSlNo);
     setItemName(wbe.itemName);
+    setSubItemDescription(wbe.subItemDescription || "");
     setItemQuantity(wbe.itemQuantity);
     setItemRateAsPerEstimate(wbe.itemRateAsPerEstimate);
     setItemUnit(wbe.itemUnit);
@@ -3751,7 +3951,7 @@ export function WorkBasedEntryView({
       {/* Search Input */}
       <div className="relative w-64 mb-4">
         <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-neutral-400" />
-        <input 
+        <input
           type="text" placeholder="Search work name..." value={searchQuery} onChange={(e) => handleWorkSearch(e.target.value)}
           className="w-full pl-8 pr-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
         />
@@ -3760,7 +3960,7 @@ export function WorkBasedEntryView({
       <div className="border border-neutral-200 bg-white p-4 rounded space-y-4">
         <div>
           <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1.5">Select Work Name</label>
-          <select 
+          <select
             value={selectedEntryId} onChange={(e) => setSelectedEntryId(e.target.value)}
             className="w-full md:w-1/2 px-3 py-2 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-semibold text-black bg-white"
           >
@@ -3782,7 +3982,7 @@ export function WorkBasedEntryView({
               <div className="text-lg font-mono font-bold text-black">₹{totalBOQValuation.toLocaleString()}</div>
             </div>
             {!showForm && (
-              <button 
+              <button
                 onClick={() => {
                   clearForm();
                   setEditingId(null);
@@ -3849,13 +4049,23 @@ export function WorkBasedEntryView({
                   <label className="block text-[10px] uppercase font-bold text-neutral-400 mb-1">Item Unit</label>
                   <input type="text" required value={itemUnit} onChange={(e) => setItemUnit(e.target.value)} className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs font-mono" placeholder="CUM, KG, TON" />
                 </div>
+                <div className="col-span-2 md:col-span-5">
+                  <label className="block text-[10px] uppercase font-bold text-neutral-400 mb-1">Sub-Item Description</label>
+                  <textarea
+                    rows={2}
+                    value={subItemDescription}
+                    onChange={(e) => setSubItemDescription(e.target.value)}
+                    placeholder="Specific details of work completed under the main item (e.g. Providing and laying M20 concrete for foundation footing)..."
+                    className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
+                  />
+                </div>
               </div>
 
               <div className="flex justify-end gap-2 border-t border-neutral-50 pt-3">
                 <button type="button" onClick={clearForm} className="px-3 py-1 border border-neutral-200 text-xs rounded">Clear</button>
                 <button type="button" onClick={() => { setShowForm(false); setEditingId(null); }} className="px-3 py-1 border border-neutral-200 text-xs rounded">Cancel</button>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   disabled={isSaving}
                   className="px-3 py-1 bg-black text-white text-xs rounded hover:bg-neutral-900 disabled:opacity-50"
                 >
@@ -3871,7 +4081,7 @@ export function WorkBasedEntryView({
               <thead>
                 <tr className="bg-neutral-50 border-b border-neutral-200 font-bold uppercase text-[9px] text-neutral-400">
                   <th className="p-3">Item Sl No</th>
-                  <th className="p-3">Specification Name</th>
+                  <th className="p-3">Main Item & Sub-Item Description</th>
                   <th className="p-3 text-right">Quantity</th>
                   <th className="p-3">Unit</th>
                   <th className="p-3 text-right">Estimated Rate</th>
@@ -3884,7 +4094,7 @@ export function WorkBasedEntryView({
                   const isExpanded = expandedBoqId === item.id;
                   return (
                     <React.Fragment key={item.id}>
-                      <tr 
+                      <tr
                         tabIndex={0}
                         aria-expanded={isExpanded}
                         onClick={() => setExpandedBoqId(prev => (prev === item.id ? null : item.id))}
@@ -3897,7 +4107,15 @@ export function WorkBasedEntryView({
                         className={`hover:bg-neutral-50 cursor-pointer transition-colors ${isExpanded ? "bg-neutral-50/80 font-medium" : ""}`}
                       >
                         <td className="p-3 font-mono font-bold">{item.itemSlNo}</td>
-                        <td className="p-3 font-semibold">{item.itemName}</td>
+                        <td className="p-3">
+                          <div className="font-bold text-black uppercase text-xs">{item.itemName}</div>
+                          {item.subItemDescription && (
+                            <div className="text-[11px] text-neutral-600 font-normal whitespace-pre-wrap break-words mt-1 border-l-2 border-neutral-300 pl-2">
+                              <span className="text-[9px] font-bold uppercase text-neutral-400 block">Sub-Item Description</span>
+                              {item.subItemDescription}
+                            </div>
+                          )}
+                        </td>
                         <td className="p-3 text-right font-mono">{item.itemQuantity.toLocaleString()}</td>
                         <td className="p-3"><span className="bg-neutral-100 px-1 py-0.5 rounded font-bold font-mono">{item.itemUnit}</span></td>
                         <td className="p-3 text-right font-mono">₹{item.itemRateAsPerEstimate.toLocaleString()}</td>
@@ -3906,22 +4124,22 @@ export function WorkBasedEntryView({
                         </td>
                         <td className="p-3 text-right">
                           <div className="flex gap-2 justify-end" onClick={(evt) => evt.stopPropagation()}>
-                            <button 
+                            <button
                               type="button"
                               onClick={(evt) => {
                                 evt.stopPropagation();
                                 handleEdit(item);
-                              }} 
+                              }}
                               className="p-1 hover:bg-neutral-100 rounded text-neutral-600 cursor-pointer bg-white border border-neutral-200"
                             >
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
-                            <button 
+                            <button
                               type="button"
                               onClick={(evt) => {
                                 evt.stopPropagation();
                                 handleDelete(item.id);
-                              }} 
+                              }}
                               className="p-1 hover:bg-neutral-150 rounded text-neutral-600 cursor-pointer bg-white border border-neutral-200"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -3947,8 +4165,16 @@ export function WorkBasedEntryView({
                                   <span className="font-mono text-black font-semibold">{item.itemSlNo || "—"}</span>
                                 </div>
                                 <div className="sm:col-span-2">
-                                  <span className="block text-[10px] font-bold uppercase text-neutral-400">Specification Name</span>
-                                  <span className="font-bold text-black whitespace-pre-wrap overflow-wrap-anywhere">{item.itemName}</span>
+                                  <span className="block text-[10px] font-bold uppercase text-neutral-400">Main Item / Specification Name</span>
+                                  <span className="font-bold text-black uppercase">{item.itemName}</span>
+                                  {item.subItemDescription && (
+                                    <div className="mt-2 bg-neutral-50 p-2.5 rounded border border-neutral-200">
+                                      <span className="block text-[9px] font-bold uppercase text-neutral-400 mb-0.5">Sub-Item Description</span>
+                                      <p className="text-xs text-neutral-800 whitespace-pre-wrap break-words font-normal">
+                                        {item.subItemDescription}
+                                      </p>
+                                    </div>
+                                  )}
                                 </div>
                                 <div>
                                   <span className="block text-[10px] font-bold uppercase text-neutral-400">Item Quantity</span>
@@ -4019,7 +4245,7 @@ export function WorkBasedRegisterView({
   const [keyword, setKeyword] = useState("");
   const [minAmount, setMinAmount] = useState("");
   const [mlaMp, setMlaMp] = useState("");
-  
+
   // Status checkboxes
   const [ongoing, setOngoing] = useState(true);
   const [pending, setPending] = useState(true);
@@ -4059,7 +4285,7 @@ export function WorkBasedRegisterView({
     }
     if (minAmount && !String(w.amount).includes(minAmount)) return false;
     if (mlaMp && !w.mlaMpName.toLowerCase().includes(mlaMp.toLowerCase())) return false;
-    
+
     // Status filter
     if (w.status === 'Ongoing' && !ongoing) return false;
     if (w.status === 'Pending' && !pending) return false;
@@ -4071,7 +4297,7 @@ export function WorkBasedRegisterView({
 
   // Automatically select the first matching work when filters change
   const filtersActive = keyword || minAmount || mlaMp || !ongoing || !pending || !notStarted || !completed;
-  
+
   useEffect(() => {
     if (filtersActive && filteredWorks.length > 0) {
       setSelectedEntryId(filteredWorks[0].id);
@@ -4106,7 +4332,7 @@ export function WorkBasedRegisterView({
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
             <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Select Work Name</label>
-            <select 
+            <select
               value={selectedEntryId} onChange={(e) => setSelectedEntryId(e.target.value)}
               className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-semibold"
             >
@@ -4122,7 +4348,7 @@ export function WorkBasedRegisterView({
             <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Keyword Search</label>
             <div className="relative">
               <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-neutral-400" />
-              <input 
+              <input
                 type="text" value={keyword} onChange={(e) => setKeyword(e.target.value)}
                 className="w-full pl-8 pr-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
                 placeholder="Work Name or Agreement No"
@@ -4131,7 +4357,7 @@ export function WorkBasedRegisterView({
           </div>
           <div>
             <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Search Contract Amount (₹)</label>
-            <input 
+            <input
               type="text" value={minAmount} onChange={(e) => setMinAmount(e.target.value)}
               className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               placeholder="e.g. 240000"
@@ -4139,7 +4365,7 @@ export function WorkBasedRegisterView({
           </div>
           <div>
             <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">MP/MLA Sponsor</label>
-            <input 
+            <input
               type="text" value={mlaMp} onChange={(e) => setMlaMp(e.target.value)}
               className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               placeholder="MLA/MP Name"
@@ -4203,7 +4429,7 @@ export function WorkBasedRegisterView({
                     </span>
                   </td>
                   <td className="p-3 text-right">
-                    <button 
+                    <button
                       onClick={() => setSelectedEntryId(w.id)}
                       className={`px-2 py-1 text-[10px] font-bold rounded cursor-pointer ${selectedEntryId === w.id ? 'bg-neutral-200 text-black border border-neutral-300' : 'bg-black text-white hover:bg-neutral-900'}`}
                     >
@@ -4233,13 +4459,13 @@ export function WorkBasedRegisterView({
               </span>
               <h3 className="text-lg font-bold text-black mt-1">{selectedWork.workName}</h3>
               <p className="text-xs text-neutral-500 font-mono mt-0.5">
-                {selectedWork.type === 'private' 
-                  ? `Private Client Reference ID: ${selectedWork.id}` 
+                {selectedWork.type === 'private'
+                  ? `Private Client Reference ID: ${selectedWork.id}`
                   : `Agreement Number: ${selectedWork.agreementNo || "Pending"}`
                 }
               </p>
             </div>
-            <button 
+            <button
               onClick={() => window.print()}
               className="px-3 py-1.5 bg-black text-white hover:bg-neutral-900 text-xs font-semibold rounded uppercase tracking-wider flex items-center gap-1.5"
             >
@@ -4445,10 +4671,10 @@ export function OfficeWiseWorkView({
   const [searchQuery, setSearchQuery] = useState("");
 
   const officeNames = Array.from(new Set(entries.map(e => e.nameOfOffice)));
-  const filteredEntries = (selectedOffice 
-    ? entries.filter(e => e.nameOfOffice === selectedOffice) 
+  const filteredEntries = (selectedOffice
+    ? entries.filter(e => e.nameOfOffice === selectedOffice)
     : entries
-  ).filter(e => 
+  ).filter(e =>
     e.workName.toLowerCase().includes(searchQuery.toLowerCase()) ||
     (e.agreementNo || "").toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -4463,7 +4689,7 @@ export function OfficeWiseWorkView({
       {/* Search Input */}
       <div className="relative w-64 mb-4">
         <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-neutral-400" />
-        <input 
+        <input
           type="text" placeholder="Search work title or agreement..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
           className="w-full pl-8 pr-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
         />
@@ -4472,7 +4698,7 @@ export function OfficeWiseWorkView({
       <div className="border border-neutral-200 bg-white p-4 rounded space-y-4">
         <div>
           <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1.5">Select Office Wing / Division</label>
-          <select 
+          <select
             value={selectedOffice} onChange={(e) => setSelectedOffice(e.target.value)}
             className="w-full md:w-1/2 px-3 py-2 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-semibold text-black bg-white"
           >
@@ -4546,7 +4772,7 @@ export function WorkStatusUpdationView({
       setSelectedEntryId("");
       return;
     }
-    const match = entries.find(e => 
+    const match = entries.find(e =>
       e.workName.toLowerCase().includes(query.toLowerCase())
     );
     if (match) {
@@ -4648,7 +4874,7 @@ export function WorkStatusUpdationView({
     })();
   };
 
-  const filteredEntries = entries.filter(e => 
+  const filteredEntries = entries.filter(e =>
     e.workName.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -4662,7 +4888,7 @@ export function WorkStatusUpdationView({
       {/* Search Input */}
       <div className="relative w-64 mb-4">
         <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-neutral-400" />
-        <input 
+        <input
           type="text" placeholder="Search work name..." value={searchQuery} onChange={(e) => handleWorkSearch(e.target.value)}
           className="w-full pl-8 pr-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
         />
@@ -4671,7 +4897,7 @@ export function WorkStatusUpdationView({
       <div className="border border-neutral-200 bg-white p-4 rounded space-y-4">
         <div>
           <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1.5">Work Selector</label>
-          <select 
+          <select
             value={selectedEntryId} onChange={(e) => handleSelectWork(e.target.value)}
             className="w-full md:w-1/2 px-3 py-2 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-semibold text-black bg-white"
           >
@@ -4695,35 +4921,35 @@ export function WorkStatusUpdationView({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Work Name</label>
-              <input 
+              <input
                 type="text" required value={workName} onChange={(e) => setWorkName(e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Contract Amount (₹)</label>
-              <input 
+              <input
                 type="number" required value={amount === 0 ? "" : amount} onChange={(e) => setAmount(e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-mono"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Name Of Office</label>
-              <input 
+              <input
                 type="text" required value={nameOfOffice} onChange={(e) => setNameOfOffice(e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">MLA/MP Name (Optional)</label>
-              <input 
+              <input
                 type="text" value={mlaMpName} onChange={(e) => setMlaMpName(e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">LOA Received</label>
-              <select 
+              <select
                 value={loaReceived ? "true" : "false"} onChange={(e) => setLoaReceived(e.target.value === "true")}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none"
               >
@@ -4733,70 +4959,70 @@ export function WorkStatusUpdationView({
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Last Date To Execute Agreement</label>
-              <input 
+              <input
                 type="date" required value={lastDateToExecuteAgreement} onChange={(e) => setLastDateToExecuteAgreement(e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Amount Of Stamp Paper Required</label>
-              <input 
+              <input
                 type="number" required value={amountOfStampPaperRequired === 0 ? "" : amountOfStampPaperRequired} onChange={(e) => setAmountOfStampPaperRequired(e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none font-mono"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Security Amount</label>
-              <input 
+              <input
                 type="number" required value={securityAmount === 0 ? "" : securityAmount} onChange={(e) => setSecurityAmount(e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none font-mono"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Performance Guarantee</label>
-              <input 
+              <input
                 type="number" value={performanceGuarantee === 0 ? "" : performanceGuarantee} onChange={(e) => setPerformanceGuarantee(e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none font-mono"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">DLP Period As Per LOA</label>
-              <input 
+              <input
                 type="text" required value={dlpPeriodAsPerInLOA} onChange={(e) => setDlpPeriodAsPerInLOA(e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Agreement No</label>
-              <input 
+              <input
                 type="text" required value={agreementNo} onChange={(e) => setAgreementNo(e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none font-mono"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Site Handover Date</label>
-              <input 
+              <input
                 type="date" required value={siteHandoverDate} onChange={(e) => setSiteHandoverDate(e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Work Completion Date As Per Agreement</label>
-              <input 
+              <input
                 type="date" required value={workCompletionDateAsPerAgreement} onChange={(e) => setWorkCompletionDateAsPerAgreement(e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Actual Completion Date</label>
-              <input 
+              <input
                 type="date" value={actualCompletionDate} onChange={(e) => setActualCompletionDate(e.target.value)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Status</label>
-              <select 
+              <select
                 value={status} onChange={(e) => setStatus(e.target.value as any)}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none"
               >
@@ -4808,7 +5034,7 @@ export function WorkStatusUpdationView({
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1">Payment Received (₹)</label>
-              <input 
+              <input
                 type="number" value={paymentReceived === 0 ? "" : paymentReceived} onChange={(e) => setPaymentReceived(e.target.value === "" ? 0 : Number(e.target.value))}
                 className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none font-mono"
               />
@@ -4816,7 +5042,7 @@ export function WorkStatusUpdationView({
           </div>
 
           <div className="flex gap-2 justify-end border-t border-neutral-100 pt-3">
-            <button 
+            <button
               type="submit"
               className="px-4 py-2 bg-black text-white hover:bg-neutral-900 text-xs font-semibold rounded uppercase tracking-wider"
             >
@@ -4907,7 +5133,7 @@ export function ExpenseUpdationView({
       ...entries.map(e => ({ id: e.id, name: e.workName })),
       ...(privateWorks || []).map(p => ({ id: p.id, name: p.workName }))
     ];
-    const match = combined.find(opt => 
+    const match = combined.find(opt =>
       opt.name.toLowerCase().includes(query.toLowerCase())
     );
     if (match) {
@@ -5059,7 +5285,7 @@ export function ExpenseUpdationView({
       {/* Search Input */}
       <div className="relative w-64 mb-4">
         <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-neutral-400" />
-        <input 
+        <input
           type="text" placeholder="Search work name..." value={searchQuery} onChange={(e) => handleWorkSearch(e.target.value)}
           className="w-full pl-8 pr-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
         />
@@ -5068,7 +5294,7 @@ export function ExpenseUpdationView({
       <div className="border border-neutral-200 bg-white p-4 rounded space-y-4">
         <div>
           <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1.5">Select Work Name</label>
-          <select 
+          <select
             value={selectedEntryId} onChange={(e) => setSelectedEntryId(e.target.value)}
             className="w-full md:w-1/2 px-3 py-2 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-semibold text-black bg-white"
           >
@@ -5090,7 +5316,7 @@ export function ExpenseUpdationView({
               <div className="text-lg font-mono font-bold text-black font-semibold">₹{totalExpenseValuation.toLocaleString()}</div>
             </div>
             {!showForm && (
-              <button 
+              <button
                 onClick={() => { clearForm(); setEditingId(null); setShowForm(true); }}
                 className="px-3 py-1.5 bg-black text-white hover:bg-neutral-900 text-xs font-semibold rounded uppercase tracking-wider flex items-center gap-1"
               >
@@ -5107,20 +5333,20 @@ export function ExpenseUpdationView({
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-[10px] uppercase font-bold text-neutral-400 mb-1">Date</label>
-                  <input 
-                    type="date" 
-                    required 
-                    value={date} 
-                    onChange={(e) => setDate(e.target.value)} 
-                    className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs text-black bg-white focus:outline-none focus:border-black" 
+                  <input
+                    type="date"
+                    required
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs text-black bg-white focus:outline-none focus:border-black"
                   />
                 </div>
                 <div>
                   <label className="block text-[10px] uppercase font-bold text-neutral-400 mb-1">Description</label>
-                  <select 
-                    required 
-                    value={description} 
-                    onChange={(e) => setDescription(e.target.value)} 
+                  <select
+                    required
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
                     className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs text-black bg-white focus:outline-none focus:border-black font-semibold"
                   >
                     {descriptionOptions.map(opt => (
@@ -5128,26 +5354,26 @@ export function ExpenseUpdationView({
                     ))}
                   </select>
                   {description === "Others" && (
-                    <input 
-                      type="text" 
-                      required 
-                      placeholder="Specify other description" 
-                      value={customDescription} 
-                      onChange={(e) => setCustomDescription(e.target.value)} 
-                      className="w-full mt-2 px-3 py-1.5 border border-neutral-200 rounded text-xs text-black bg-white focus:outline-none focus:border-black font-semibold" 
+                    <input
+                      type="text"
+                      required
+                      placeholder="Specify other description"
+                      value={customDescription}
+                      onChange={(e) => setCustomDescription(e.target.value)}
+                      className="w-full mt-2 px-3 py-1.5 border border-neutral-200 rounded text-xs text-black bg-white focus:outline-none focus:border-black font-semibold"
                     />
                   )}
                 </div>
                 <div>
                   <label className="block text-[10px] uppercase font-bold text-neutral-400 mb-1">Amount (₹)</label>
-                  <input 
-                    type="number" 
-                    required 
+                  <input
+                    type="number"
+                    required
                     min="1"
-                    placeholder="e.g. 5000" 
-                    value={amount} 
-                    onChange={(e) => setAmount(e.target.value === "" ? "" : Number(e.target.value))} 
-                    className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs font-mono text-black bg-white focus:outline-none focus:border-black font-semibold" 
+                    placeholder="e.g. 5000"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value === "" ? "" : Number(e.target.value))}
+                    className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs font-mono text-black bg-white focus:outline-none focus:border-black font-semibold"
                   />
                 </div>
               </div>
@@ -5155,8 +5381,8 @@ export function ExpenseUpdationView({
               <div className="flex justify-end gap-2 border-t border-neutral-50 pt-3">
                 <button type="button" onClick={clearForm} className="px-3 py-1 border border-neutral-200 text-xs rounded font-semibold text-neutral-700 bg-white hover:bg-neutral-50">Clear</button>
                 <button type="button" onClick={() => { setShowForm(false); setEditingId(null); }} className="px-3 py-1 border border-neutral-200 text-xs rounded font-semibold text-neutral-700 bg-white hover:bg-neutral-50">Cancel</button>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   disabled={isSaving}
                   className="px-3 py-1 bg-black text-white text-xs rounded hover:bg-neutral-900 font-semibold disabled:opacity-50"
                 >
@@ -5187,7 +5413,7 @@ export function ExpenseUpdationView({
 
                   return (
                     <React.Fragment key={exp.id}>
-                      <tr 
+                      <tr
                         tabIndex={0}
                         aria-expanded={isExpanded}
                         onClick={() => setExpandedExpenseId(prev => (prev === exp.id ? null : exp.id))}
@@ -5208,22 +5434,22 @@ export function ExpenseUpdationView({
                         </td>
                         <td className="p-3 text-right">
                           <div className="flex gap-2 justify-end" onClick={(evt) => evt.stopPropagation()}>
-                            <button 
+                            <button
                               type="button"
                               onClick={(evt) => {
                                 evt.stopPropagation();
                                 handleEdit(exp);
-                              }} 
+                              }}
                               className="p-1 hover:bg-neutral-100 rounded text-neutral-600 cursor-pointer bg-white border border-neutral-200"
                             >
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
-                            <button 
+                            <button
                               type="button"
                               onClick={(evt) => {
                                 evt.stopPropagation();
                                 handleDelete(exp.id);
-                              }} 
+                              }}
                               className="p-1 hover:bg-neutral-150 rounded text-neutral-600 cursor-pointer bg-white border border-neutral-200"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -5320,7 +5546,7 @@ export function ProfitCalculationView({
   ];
 
   // Search filter
-  const filteredWorks = allWorks.filter(w => 
+  const filteredWorks = allWorks.filter(w =>
     w.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -5339,11 +5565,11 @@ export function ProfitCalculationView({
   let profitPercentage = 0;
 
   if (selectedWork) {
-    agreedAmount = selectedWork.type === 'entry' 
-      ? selectedWork.original.amount 
+    agreedAmount = selectedWork.type === 'entry'
+      ? selectedWork.original.amount
       : selectedWork.original.approxFinalWorkAmount;
     gstApplicable = selectedWork.original.gstApplicable !== false;
-    
+
     // Calculate materials cost from Cement Loads & Tar Loads
     const cementCost = cementLoads
       .filter(cl => cl.workId === selectedWork.id)
@@ -5386,14 +5612,14 @@ export function ProfitCalculationView({
       { Parameter: "Profit Percentage", Value: `${Math.round(profitPercentage * 100) / 100}%` },
       { Parameter: "OVERALL PROFIT", Value: `₹${overallProfit.toLocaleString()}` }
     ];
-    
+
     // Create Excel-compatible CSV output
-    const csvContent = "data:text/csv;charset=utf-8," 
+    const csvContent = "data:text/csv;charset=utf-8,"
       + "BuildCorp ERP - Profit Calculation Report\n"
       + `Generated: ${new Date().toLocaleDateString()}\n\n`
       + "Parameter,Value\n"
       + reportData.map(r => `"${r.Parameter}","${r.Value}"`).join("\n");
-      
+
     const link = document.createElement("a");
     link.setAttribute("href", encodeURI(csvContent));
     link.setAttribute("download", `profit_calculation_${selectedWork.id}.csv`);
@@ -5415,16 +5641,16 @@ export function ProfitCalculationView({
           <label className="block text-[10px] font-bold uppercase text-neutral-500 mb-1.5">Search & Select Work</label>
           <div className="relative mb-2">
             <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-neutral-400" />
-            <input 
-              type="text" 
-              placeholder="Search work by name..." 
-              value={searchQuery} 
+            <input
+              type="text"
+              placeholder="Search work by name..."
+              value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-8 pr-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
             />
           </div>
-          <select 
-            value={selectedEntryId} 
+          <select
+            value={selectedEntryId}
             onChange={(e) => setSelectedEntryId(e.target.value)}
             className="w-full px-3 py-1.5 border border-neutral-200 rounded text-xs focus:outline-none focus:border-black font-semibold text-black bg-white"
           >
@@ -5457,8 +5683,8 @@ export function ProfitCalculationView({
             <div className="flex justify-between border-b border-neutral-100 pb-1.5">
               <span className="text-neutral-500 uppercase font-bold text-[9px]">Work Status</span>
               <span className={`px-2 py-0.5 rounded text-[10px] font-sans font-bold ${
-                selectedWork.type === 'entry' && selectedWork.original.status === 'Completed' 
-                  ? 'bg-green-50 text-green-700 border border-green-200' 
+                selectedWork.type === 'entry' && selectedWork.original.status === 'Completed'
+                  ? 'bg-green-50 text-green-700 border border-green-200'
                   : selectedWork.type === 'private'
                     ? 'bg-blue-50 text-blue-700 border border-blue-200'
                     : 'bg-yellow-50 text-yellow-700 border border-yellow-200'
@@ -5528,23 +5754,23 @@ export function ProfitCalculationView({
 
           {/* Action Buttons */}
           <div className="flex justify-between gap-3 pt-4 border-t border-neutral-100 print:hidden">
-            <button 
-              type="button" 
+            <button
+              type="button"
               onClick={() => onNavigate("dashboard")}
               className="px-4 py-1.5 border border-neutral-200 text-xs rounded font-semibold text-neutral-700 bg-white hover:bg-neutral-50 cursor-pointer"
             >
               Back
             </button>
             <div className="flex gap-2">
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={handleExcelExport}
                 className="px-4 py-1.5 border border-neutral-300 text-xs rounded font-semibold text-neutral-700 bg-white hover:bg-neutral-50 cursor-pointer"
               >
                 Excel
               </button>
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={() => window.print()}
                 className="px-4 py-1.5 bg-black hover:bg-neutral-900 text-white text-xs rounded font-semibold cursor-pointer"
               >
@@ -5558,6 +5784,209 @@ export function ProfitCalculationView({
           Please select a contract or private work from the dropdown to calculate profitability.
         </div>
       )}
+    </div>
+  );
+}
+
+// ==========================================
+// DLP NOTIFICATIONS VIEW
+// ==========================================
+export function DlpNotificationsView({
+  entries,
+  onNavigate
+}: {
+  entries: Entry[];
+  onNavigate: (tab: string) => void;
+}) {
+  const [filter, setFilter] = useState<'expired' | 'expiring_soon' | 'active' | 'all'>('expired');
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const formatDateStr = (d?: string | Date | null) => {
+    if (!d) return "—";
+    try {
+      return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch {
+      return String(d);
+    }
+  };
+
+  const evaluated = useMemo(() => {
+    return entries.map(entry => ({
+      entry,
+      dlp: evaluateDlpStatus(entry)
+    })).filter(item => item.dlp !== null);
+  }, [entries]);
+
+  const expiredList = useMemo(() => evaluated.filter(item => item.dlp!.isExpired), [evaluated]);
+  const expiringSoonList = useMemo(() => evaluated.filter(item => item.dlp!.isExpiringSoon), [evaluated]);
+  const activeList = useMemo(() => evaluated.filter(item => item.dlp!.isActive), [evaluated]);
+
+  const displayed = useMemo(() => {
+    let list = evaluated;
+    if (filter === 'expired') list = expiredList;
+    else if (filter === 'expiring_soon') list = expiringSoonList;
+    else if (filter === 'active') list = activeList;
+
+    if (!searchQuery) return list;
+    const q = searchQuery.toLowerCase();
+    return list.filter(item => item.entry.workName.toLowerCase().includes(q));
+  }, [evaluated, expiredList, expiringSoonList, activeList, filter, searchQuery]);
+
+  return (
+    <div className="space-y-6 text-black">
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-xl font-bold tracking-tight uppercase flex items-center gap-2">
+            <AlertCircle className="w-5 h-5 text-black" />
+            DLP Notifications & Defect Period Monitoring
+          </h2>
+          <p className="text-xs text-neutral-500 font-medium mt-0.5">
+            Automated Defect Liability Period alerts computed from Actual Completion Date + LOA DLP Period.
+          </p>
+        </div>
+        <button
+          onClick={() => onNavigate("dashboard")}
+          className="px-3 py-1.5 border border-neutral-300 text-xs font-semibold hover:bg-neutral-100 rounded text-black bg-white cursor-pointer"
+        >
+          Back to Dashboard
+        </button>
+      </div>
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div
+          onClick={() => setFilter('expired')}
+          className={`border p-4 rounded cursor-pointer transition-all ${filter === 'expired' ? 'border-red-600 bg-red-50/50 shadow-sm' : 'border-neutral-200 bg-white hover:border-black'}`}
+        >
+          <div className="text-[10px] uppercase font-bold text-red-600 tracking-wider">DLP Period Crossed (Expired)</div>
+          <div className="text-2xl font-mono font-bold mt-1 text-red-700">{expiredList.length}</div>
+          <div className="text-[10px] text-neutral-500 mt-1">Requires immediate attention / final handover</div>
+        </div>
+        <div
+          onClick={() => setFilter('expiring_soon')}
+          className={`border p-4 rounded cursor-pointer transition-all ${filter === 'expiring_soon' ? 'border-yellow-600 bg-yellow-50/50 shadow-sm' : 'border-neutral-200 bg-white hover:border-black'}`}
+        >
+          <div className="text-[10px] uppercase font-bold text-yellow-600 tracking-wider">DLP Expiring Soon (&le;30 Days)</div>
+          <div className="text-2xl font-mono font-bold mt-1 text-yellow-700">{expiringSoonList.length}</div>
+          <div className="text-[10px] text-neutral-500 mt-1">Nearing expiry date</div>
+        </div>
+        <div
+          onClick={() => setFilter('active')}
+          className={`border p-4 rounded cursor-pointer transition-all ${filter === 'active' ? 'border-black bg-neutral-100 shadow-sm' : 'border-neutral-200 bg-white hover:border-black'}`}
+        >
+          <div className="text-[10px] uppercase font-bold text-neutral-600 tracking-wider">DLP Active</div>
+          <div className="text-2xl font-mono font-bold mt-1 text-black">{activeList.length}</div>
+          <div className="text-[10px] text-neutral-500 mt-1">Currently within defect warranty period</div>
+        </div>
+      </div>
+
+      {/* Filter Tabs & Search */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-200 pb-3">
+        <div className="flex gap-2">
+          <button
+            onClick={() => setFilter('expired')}
+            className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${filter === 'expired' ? 'bg-red-600 text-white' : 'border border-neutral-300 text-neutral-700 bg-white hover:bg-neutral-100'}`}
+          >
+            Expired ({expiredList.length})
+          </button>
+          <button
+            onClick={() => setFilter('expiring_soon')}
+            className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${filter === 'expiring_soon' ? 'bg-yellow-500 text-white' : 'border border-neutral-300 text-neutral-700 bg-white hover:bg-neutral-100'}`}
+          >
+            Expiring Soon ({expiringSoonList.length})
+          </button>
+          <button
+            onClick={() => setFilter('active')}
+            className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${filter === 'active' ? 'bg-black text-white' : 'border border-neutral-300 text-neutral-700 bg-white hover:bg-neutral-100'}`}
+          >
+            Active ({activeList.length})
+          </button>
+          <button
+            onClick={() => setFilter('all')}
+            className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${filter === 'all' ? 'bg-neutral-800 text-white' : 'border border-neutral-300 text-neutral-700 bg-white hover:bg-neutral-100'}`}
+          >
+            All Evaluated ({evaluated.length})
+          </button>
+        </div>
+        <div className="relative w-64">
+          <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-neutral-400" />
+          <input
+            type="text" placeholder="Search work name..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-8 pr-3 py-1.5 border border-neutral-300 rounded text-xs focus:outline-none focus:border-black text-black bg-white"
+          />
+        </div>
+      </div>
+
+      {/* Notification Cards List */}
+      <div className="space-y-4">
+        {displayed.length === 0 ? (
+          <div className="border border-neutral-200 bg-white p-8 rounded text-center text-xs text-neutral-500">
+            No contract works match the selected DLP status filter.
+          </div>
+        ) : (
+          displayed.map(({ entry, dlp }) => {
+            const isExpired = dlp!.isExpired;
+            const isExpiringSoon = dlp!.isExpiringSoon;
+
+            let cardBorder = "border-neutral-200 bg-white";
+            let badgeStyle = "bg-black text-white";
+            if (isExpired) {
+              cardBorder = "border-red-500 bg-red-50/30 shadow-sm";
+              badgeStyle = "bg-red-600 text-white font-bold animate-pulse";
+            } else if (isExpiringSoon) {
+              cardBorder = "border-yellow-400 bg-yellow-50/30";
+              badgeStyle = "bg-yellow-500 text-white font-bold";
+            }
+
+            return (
+              <div key={entry.id} className={`border ${cardBorder} p-5 rounded space-y-3 transition-colors`}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-neutral-200 pb-2">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">
+                      Alert Status: {isExpired ? "DLP Period Crossed" : isExpiringSoon ? "DLP Expiring Soon" : "DLP Active"}
+                    </span>
+                    <h3 className="text-base font-bold text-black mt-0.5">{entry.workName}</h3>
+                  </div>
+                  <span className={`px-2.5 py-1 rounded text-xs font-mono uppercase tracking-wider ${badgeStyle}`}>
+                    {dlp!.status}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+                  <div>
+                    <span className="block text-[10px] font-bold text-neutral-400 uppercase">Actual Completion</span>
+                    <span className="font-mono font-semibold text-black">{formatDateStr(dlp!.actualCompletionDate)}</span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-bold text-neutral-400 uppercase">DLP Period (LOA)</span>
+                    <span className="font-semibold text-black">{dlp!.dlpPeriod}</span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-bold text-neutral-400 uppercase">DLP Expiry Date</span>
+                    <span className="font-mono font-bold text-black">{formatDateStr(dlp!.dlpExpiryDate)}</span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-bold text-neutral-400 uppercase">Time Elapsed / Difference</span>
+                    <span className={`font-mono font-bold ${isExpired ? 'text-red-600' : isExpiringSoon ? 'text-yellow-600' : 'text-black'}`}>
+                      {dlp!.daysRemaining < 0 ? `${Math.abs(dlp!.daysRemaining)} days ago` : `${dlp!.daysRemaining} days remaining`}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center pt-2 border-t border-neutral-100">
+                  <span className="text-[10px] text-neutral-500">Office: {entry.nameOfOffice || "—"} | Agreement No: {entry.agreementNo || "—"}</span>
+                  <button
+                    onClick={() => onNavigate("entry")}
+                    className="px-3 py-1 bg-black text-white hover:bg-neutral-800 rounded text-xs font-semibold cursor-pointer"
+                  >
+                    Manage Work Entry &rarr;
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }

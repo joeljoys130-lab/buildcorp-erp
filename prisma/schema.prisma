@@ -295,6 +295,7 @@ model WorkBasedEntry {
   entryId               String
   itemSlNo              String
   itemName              String
+  subItemDescription    String?
   itemQuantity          Float
   itemRateAsPerEstimate Float
   totalAmountPerItem    Float
