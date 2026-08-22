@@ -26,9 +26,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const normEmail = email.toLowerCase().trim();
   const cleanOtp = otp.trim();
 
-  // ── CONTROLLED TEST ACCOUNT OTP GUARD ──────────────────────────────
-  // Allows 999999 strictly for test@buildcorp.com demo/testing account
-  if (normEmail === 'test@buildcorp.com' && cleanOtp === '999999') {
+  // ── CONTROLLED TEST ACCOUNT OTP GUARD (DEVELOPMENT ONLY) ───────────
+  // Allows 999999 strictly during local development testing for demo account
+  if (process.env.NODE_ENV !== 'production' && normEmail === 'test@buildcorp.com' && cleanOtp === '999999') {
     const user = REGISTERED_USERS['test@buildcorp.com'] || (await findUserByEmail(normEmail));
     if (user) {
       const token = generateAccessToken({
