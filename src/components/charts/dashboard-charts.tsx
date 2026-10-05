@@ -7,7 +7,7 @@ import {
   AreaChart, Area
 } from "recharts";
 import { ChartCard } from "./chart-card";
-import { CustomTooltip, formatINR } from "./custom-tooltip";
+import { CustomTooltip } from "./custom-tooltip";
 import { Entry, PrivateWork, Expense } from "@/lib/types";
 
 // =========================================================================
@@ -20,9 +20,9 @@ interface ProjectStatusChartProps {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  Ongoing: "#171717",    // Deep charcoal/black
-  Completed: "#059669",  // Emerald
-  Pending: "#d97706",    // Amber
+  Ongoing: "#171717",       // Deep charcoal/black
+  Completed: "#059669",     // Emerald
+  Pending: "#d97706",       // Amber
   "Not Started": "#737373", // Slate gray
 };
 
@@ -58,11 +58,13 @@ export const ProjectStatusChart: React.FC<ProjectStatusChartProps> = ({
       subtitle={`${totalWorks} total contracts & private works in database`}
       isEmpty={chartData.length === 0}
       emptyMessage="No works found in database."
-      height={260}
+      height="auto"
+      className="min-h-[320px] sm:min-h-[260px]"
     >
-      <div className="w-full h-full flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="w-full sm:w-1/2 h-[190px] relative">
-          <ResponsiveContainer width="100%" height="100%">
+      <div className="w-full flex flex-col sm:flex-row items-center justify-between gap-4 min-w-0">
+        {/* Pie graphic container with guaranteed dimensions */}
+        <div className="w-full sm:w-1/2 h-[190px] relative min-w-0 flex items-center justify-center">
+          <ResponsiveContainer width="100%" height={190} minWidth={0}>
             <PieChart>
               <Tooltip
                 content={
@@ -79,8 +81,8 @@ export const ProjectStatusChart: React.FC<ProjectStatusChartProps> = ({
                 nameKey="name"
                 cx="50%"
                 cy="50%"
-                innerRadius={48}
-                outerRadius={75}
+                innerRadius={46}
+                outerRadius={72}
                 paddingAngle={3}
                 stroke="#fff"
                 strokeWidth={2}
@@ -98,7 +100,7 @@ export const ProjectStatusChart: React.FC<ProjectStatusChartProps> = ({
         </div>
 
         {/* Legend table */}
-        <div className="w-full sm:w-1/2 space-y-1.5 pr-2">
+        <div className="w-full sm:w-1/2 space-y-1.5 min-w-0 sm:pr-2">
           {chartData.map((item) => {
             const percent = totalWorks > 0 ? ((item.count / totalWorks) * 100).toFixed(0) : "0";
             return (
@@ -106,14 +108,14 @@ export const ProjectStatusChart: React.FC<ProjectStatusChartProps> = ({
                 key={item.name}
                 className="flex items-center justify-between py-1 border-b border-neutral-100 text-xs"
               >
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 min-w-0">
                   <span
                     className="w-2.5 h-2.5 rounded-full shrink-0"
                     style={{ backgroundColor: item.fill }}
                   />
-                  <span className="font-medium text-neutral-700 text-[11px]">{item.name}</span>
+                  <span className="font-medium text-neutral-700 text-[11px] truncate">{item.name}</span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                   <span className="font-mono font-bold text-black text-[11px]">{item.count}</span>
                   <span className="text-[10px] text-neutral-400 font-mono w-8 text-right">
                     {percent}%
@@ -178,41 +180,44 @@ export const FinancialOverviewChart: React.FC<FinancialOverviewChartProps> = ({
       subtitle="Total Valuation, Operational Expenses & Profitability (INR)"
       isEmpty={isEmpty}
       emptyMessage="No financial valuation records available."
-      height={260}
+      height={250}
     >
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart
-          data={chartData}
-          margin={{ top: 15, right: 10, left: 5, bottom: 25 }}
-        >
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-          <XAxis
-            dataKey="name"
-            tick={{ fontSize: 10, fill: "#525252" }}
-            axisLine={{ stroke: "#e5e5e5" }}
-            tickLine={false}
-          />
-          <YAxis
-            tick={{ fontSize: 9, fill: "#737373" }}
-            axisLine={false}
-            tickLine={false}
-            tickFormatter={(val) => {
-              if (val >= 10000000) return `₹${(val / 10000000).toFixed(1)}Cr`;
-              if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
-              if (val >= 1000) return `₹${(val / 1000).toFixed(0)}K`;
-              return `₹${val}`;
-            }}
-          />
-          <Tooltip
-            content={<CustomTooltip currency={true} titlePrefix="Metric" />}
-          />
-          <Bar dataKey="amount" name="Amount" radius={[4, 4, 0, 0]}>
-            {chartData.map((entry, index) => (
-              <Cell key={`bar-${index}`} fill={entry.fill} />
-            ))}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
+      <div className="w-full h-[250px] min-w-0">
+        <ResponsiveContainer width="100%" height={250} minWidth={0}>
+          <BarChart
+            data={chartData}
+            margin={{ top: 15, right: 10, left: -10, bottom: 25 }}
+          >
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+            <XAxis
+              dataKey="name"
+              tick={{ fontSize: 10, fill: "#525252" }}
+              axisLine={{ stroke: "#e5e5e5" }}
+              tickLine={false}
+            />
+            <YAxis
+              tick={{ fontSize: 9, fill: "#737373" }}
+              axisLine={false}
+              tickLine={false}
+              width={45}
+              tickFormatter={(val) => {
+                if (val >= 10000000) return `₹${(val / 10000000).toFixed(1)}Cr`;
+                if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
+                if (val >= 1000) return `₹${(val / 1000).toFixed(0)}K`;
+                return `₹${val}`;
+              }}
+            />
+            <Tooltip
+              content={<CustomTooltip currency={true} titlePrefix="Metric" />}
+            />
+            <Bar dataKey="amount" name="Amount" radius={[4, 4, 0, 0]}>
+              {chartData.map((entry, index) => (
+                <Cell key={`bar-${index}`} fill={entry.fill} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
     </ChartCard>
   );
 };
@@ -231,7 +236,6 @@ export const ExpenseTrendChart: React.FC<ExpenseTrendChartProps> = ({
   const chartData = useMemo(() => {
     if (!expenses || expenses.length === 0) return [];
 
-    // Group expenses by Year-Month
     const monthMap: Record<string, { total: number; dateObj: Date; label: string }> = {};
 
     expenses.forEach((exp) => {
@@ -252,7 +256,6 @@ export const ExpenseTrendChart: React.FC<ExpenseTrendChartProps> = ({
       monthMap[yearMonthKey].total += Number(exp.amount) || 0;
     });
 
-    // Sort chronologically
     return Object.entries(monthMap)
       .sort((a, b) => a[1].dateObj.getTime() - b[1].dateObj.getTime())
       .map(([_, val]) => ({
@@ -267,52 +270,55 @@ export const ExpenseTrendChart: React.FC<ExpenseTrendChartProps> = ({
       subtitle="Monthly expenditure timeline across labor, fuel, materials & site fees"
       isEmpty={chartData.length === 0}
       emptyMessage="No expense transactions recorded yet."
-      height={260}
+      height={250}
     >
-      <ResponsiveContainer width="100%" height="100%">
-        <AreaChart
-          data={chartData}
-          margin={{ top: 15, right: 10, left: 10, bottom: 20 }}
-        >
-          <defs>
-            <linearGradient id="expenseTrendGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#ef4444" stopOpacity={0.25} />
-              <stop offset="95%" stopColor="#ef4444" stopOpacity={0.0} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-          <XAxis
-            dataKey="month"
-            tick={{ fontSize: 10, fill: "#525252" }}
-            axisLine={{ stroke: "#e5e5e5" }}
-            tickLine={false}
-          />
-          <YAxis
-            tick={{ fontSize: 9, fill: "#737373" }}
-            axisLine={false}
-            tickLine={false}
-            tickFormatter={(val) => {
-              if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
-              if (val >= 1000) return `₹${(val / 1000).toFixed(0)}K`;
-              return `₹${val}`;
-            }}
-          />
-          <Tooltip
-            content={<CustomTooltip currency={true} titlePrefix="Month" />}
-          />
-          <Area
-            type="monotone"
-            dataKey="amount"
-            name="Expense"
-            stroke="#ef4444"
-            strokeWidth={2}
-            fillOpacity={1}
-            fill="url(#expenseTrendGradient)"
-            dot={{ r: 3, fill: "#ef4444" }}
-            activeDot={{ r: 5 }}
-          />
-        </AreaChart>
-      </ResponsiveContainer>
+      <div className="w-full h-[250px] min-w-0">
+        <ResponsiveContainer width="100%" height={250} minWidth={0}>
+          <AreaChart
+            data={chartData}
+            margin={{ top: 15, right: 10, left: -10, bottom: 20 }}
+          >
+            <defs>
+              <linearGradient id="expenseTrendGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#ef4444" stopOpacity={0.25} />
+                <stop offset="95%" stopColor="#ef4444" stopOpacity={0.0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+            <XAxis
+              dataKey="month"
+              tick={{ fontSize: 10, fill: "#525252" }}
+              axisLine={{ stroke: "#e5e5e5" }}
+              tickLine={false}
+            />
+            <YAxis
+              tick={{ fontSize: 9, fill: "#737373" }}
+              axisLine={false}
+              tickLine={false}
+              width={45}
+              tickFormatter={(val) => {
+                if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
+                if (val >= 1000) return `₹${(val / 1000).toFixed(0)}K`;
+                return `₹${val}`;
+              }}
+            />
+            <Tooltip
+              content={<CustomTooltip currency={true} titlePrefix="Month" />}
+            />
+            <Area
+              type="monotone"
+              dataKey="amount"
+              name="Expense"
+              stroke="#ef4444"
+              strokeWidth={2}
+              fillOpacity={1}
+              fill="url(#expenseTrendGradient)"
+              dot={{ r: 3, fill: "#ef4444" }}
+              activeDot={{ r: 5 }}
+            />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
     </ChartCard>
   );
 };
@@ -333,7 +339,6 @@ export const WorkFinancialComparisonChart: React.FC<WorkFinancialComparisonChart
   expenses = [],
 }) => {
   const chartData = useMemo(() => {
-    // Combine top active projects
     const allWorks = [
       ...entries.map((e) => ({
         id: e.id,
@@ -349,7 +354,6 @@ export const WorkFinancialComparisonChart: React.FC<WorkFinancialComparisonChart
       })),
     ];
 
-    // Calculate expenses per work
     const enriched = allWorks.map((work) => {
       const workExp = expenses
         .filter((exp) => exp.workId === work.id)
@@ -357,9 +361,8 @@ export const WorkFinancialComparisonChart: React.FC<WorkFinancialComparisonChart
 
       const profit = work.valuation - workExp;
 
-      // Truncate name for clean axis readability
       const shortName =
-        work.name.length > 18 ? `${work.name.substring(0, 16)}…` : work.name;
+        work.name.length > 15 ? `${work.name.substring(0, 13)}…` : work.name;
 
       return {
         id: work.id,
@@ -371,7 +374,6 @@ export const WorkFinancialComparisonChart: React.FC<WorkFinancialComparisonChart
       };
     });
 
-    // Sort by valuation descending and take top 6
     return enriched
       .sort((a, b) => b.agreedAmount - a.agreedAmount)
       .slice(0, 6);
@@ -383,61 +385,64 @@ export const WorkFinancialComparisonChart: React.FC<WorkFinancialComparisonChart
       subtitle="Agreed contract value vs total logged operational expenses (Top 6 projects)"
       isEmpty={chartData.length === 0}
       emptyMessage="No projects available for comparison."
-      height={280}
+      height={270}
     >
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart
-          data={chartData}
-          margin={{ top: 15, right: 15, left: 10, bottom: 35 }}
-        >
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-          <XAxis
-            dataKey="shortName"
-            tick={{ fontSize: 9, fill: "#525252" }}
-            axisLine={{ stroke: "#e5e5e5" }}
-            tickLine={false}
-            interval={0}
-          />
-          <YAxis
-            tick={{ fontSize: 9, fill: "#737373" }}
-            axisLine={false}
-            tickLine={false}
-            tickFormatter={(val) => {
-              if (val >= 10000000) return `₹${(val / 10000000).toFixed(1)}Cr`;
-              if (val >= 100000) return `₹${(val / 100000).toFixed(0)}L`;
-              if (val >= 1000) return `₹${(val / 1000).toFixed(0)}K`;
-              return `₹${val}`;
-            }}
-          />
-          <Tooltip
-            content={<CustomTooltip currency={true} titlePrefix="Project" />}
-          />
-          <Legend
-            verticalAlign="top"
-            align="right"
-            iconType="circle"
-            wrapperStyle={{ fontSize: "11px", paddingBottom: "10px" }}
-          />
-          <Bar
-            dataKey="agreedAmount"
-            name="Agreed Amount"
-            fill="#171717"
-            radius={[3, 3, 0, 0]}
-          />
-          <Bar
-            dataKey="expenses"
-            name="Expenses"
-            fill="#ef4444"
-            radius={[3, 3, 0, 0]}
-          />
-          <Bar
-            dataKey="profit"
-            name="Net Profit"
-            fill="#059669"
-            radius={[3, 3, 0, 0]}
-          />
-        </BarChart>
-      </ResponsiveContainer>
+      <div className="w-full h-[270px] min-w-0">
+        <ResponsiveContainer width="100%" height={270} minWidth={0}>
+          <BarChart
+            data={chartData}
+            margin={{ top: 15, right: 10, left: -10, bottom: 35 }}
+          >
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+            <XAxis
+              dataKey="shortName"
+              tick={{ fontSize: 9, fill: "#525252" }}
+              axisLine={{ stroke: "#e5e5e5" }}
+              tickLine={false}
+              interval={0}
+            />
+            <YAxis
+              tick={{ fontSize: 9, fill: "#737373" }}
+              axisLine={false}
+              tickLine={false}
+              width={45}
+              tickFormatter={(val) => {
+                if (val >= 10000000) return `₹${(val / 10000000).toFixed(1)}Cr`;
+                if (val >= 100000) return `₹${(val / 100000).toFixed(0)}L`;
+                if (val >= 1000) return `₹${(val / 1000).toFixed(0)}K`;
+                return `₹${val}`;
+              }}
+            />
+            <Tooltip
+              content={<CustomTooltip currency={true} titlePrefix="Project" />}
+            />
+            <Legend
+              verticalAlign="top"
+              align="right"
+              iconType="circle"
+              wrapperStyle={{ fontSize: "10px", paddingBottom: "6px" }}
+            />
+            <Bar
+              dataKey="agreedAmount"
+              name="Agreed"
+              fill="#171717"
+              radius={[3, 3, 0, 0]}
+            />
+            <Bar
+              dataKey="expenses"
+              name="Expense"
+              fill="#ef4444"
+              radius={[3, 3, 0, 0]}
+            />
+            <Bar
+              dataKey="profit"
+              name="Profit"
+              fill="#059669"
+              radius={[3, 3, 0, 0]}
+            />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
     </ChartCard>
   );
 };

@@ -3,8 +3,7 @@
 import React, { useMemo } from "react";
 import {
   PieChart, Pie, Cell, ResponsiveContainer,
-  BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
-  AreaChart, Area
+  BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend
 } from "recharts";
 import { ChartCard } from "./chart-card";
 import { CustomTooltip, formatINR } from "./custom-tooltip";
@@ -32,7 +31,6 @@ export const ProfitBreakdownChart: React.FC<ProfitBreakdownChartProps> = ({
   totalExpenseWithGST,
   overallProfit,
   profitPercentage,
-  workName = "",
 }) => {
   const comparisonData = useMemo(() => {
     return [
@@ -42,7 +40,7 @@ export const ProfitBreakdownChart: React.FC<ProfitBreakdownChartProps> = ({
         fill: "#171717",
       },
       {
-        name: "Total Expense (GST Inc.)",
+        name: "Total Outlay (GST Inc.)",
         value: totalExpenseWithGST,
         fill: "#ef4444",
       },
@@ -77,7 +75,7 @@ export const ProfitBreakdownChart: React.FC<ProfitBreakdownChartProps> = ({
   const isEmpty = agreedAmountWithGST === 0 && totalExpenseWithGST === 0;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 min-w-0">
       {/* Margin Metric Strip */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="border border-neutral-200 bg-white p-3.5 rounded">
@@ -110,40 +108,42 @@ export const ProfitBreakdownChart: React.FC<ProfitBreakdownChartProps> = ({
           height={220}
           printHidden={false}
         >
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart
-              data={comparisonData}
-              layout="vertical"
-              margin={{ top: 10, right: 20, left: 10, bottom: 5 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
-              <XAxis
-                type="number"
-                tick={{ fontSize: 9, fill: "#737373" }}
-                axisLine={{ stroke: "#e5e5e5" }}
-                tickFormatter={(val) => {
-                  if (val >= 10000000) return `₹${(val / 10000000).toFixed(1)}Cr`;
-                  if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
-                  if (val >= 1000) return `₹${(val / 1000).toFixed(0)}K`;
-                  return `₹${val}`;
-                }}
-              />
-              <YAxis
-                type="category"
-                dataKey="name"
-                tick={{ fontSize: 9, fill: "#525252" }}
-                axisLine={false}
-                tickLine={false}
-                width={120}
-              />
-              <Tooltip content={<CustomTooltip currency={true} />} />
-              <Bar dataKey="value" name="Amount" radius={[0, 4, 4, 0]}>
-                {comparisonData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.fill} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="w-full h-[220px] min-w-0">
+            <ResponsiveContainer width="100%" height={220} minWidth={0}>
+              <BarChart
+                data={comparisonData}
+                layout="vertical"
+                margin={{ top: 10, right: 15, left: -5, bottom: 5 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
+                <XAxis
+                  type="number"
+                  tick={{ fontSize: 9, fill: "#737373" }}
+                  axisLine={{ stroke: "#e5e5e5" }}
+                  tickFormatter={(val) => {
+                    if (val >= 10000000) return `₹${(val / 10000000).toFixed(1)}Cr`;
+                    if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
+                    if (val >= 1000) return `₹${(val / 1000).toFixed(0)}K`;
+                    return `₹${val}`;
+                  }}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="name"
+                  tick={{ fontSize: 9, fill: "#525252" }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={110}
+                />
+                <Tooltip content={<CustomTooltip currency={true} />} />
+                <Bar dataKey="value" name="Amount" radius={[0, 4, 4, 0]}>
+                  {comparisonData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.fill} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </ChartCard>
 
         {/* Budget Allocation Breakdown Donut */}
@@ -151,12 +151,13 @@ export const ProfitBreakdownChart: React.FC<ProfitBreakdownChartProps> = ({
           title="Budget Allocation Breakdown"
           subtitle="Materials cost, execution expenses & net retained profit"
           isEmpty={costBreakdownData.length === 0}
-          height={220}
+          height="auto"
+          className="min-h-[220px]"
           printHidden={false}
         >
-          <div className="w-full h-full flex items-center justify-between gap-2">
-            <div className="w-1/2 h-full">
-              <ResponsiveContainer width="100%" height="100%">
+          <div className="w-full flex flex-col sm:flex-row items-center justify-between gap-3 min-w-0">
+            <div className="w-full sm:w-1/2 h-[170px] relative min-w-0 flex items-center justify-center">
+              <ResponsiveContainer width="100%" height={170} minWidth={0}>
                 <PieChart>
                   <Tooltip content={<CustomTooltip currency={true} titlePrefix="Category" />} />
                   <Pie
@@ -176,13 +177,13 @@ export const ProfitBreakdownChart: React.FC<ProfitBreakdownChartProps> = ({
                 </PieChart>
               </ResponsiveContainer>
             </div>
-            <div className="w-1/2 space-y-1.5 text-xs pr-1">
+            <div className="w-full sm:w-1/2 space-y-1.5 text-xs min-w-0 sm:pr-1">
               {costBreakdownData.map((item) => {
                 const total = costBreakdownData.reduce((s, i) => s + i.value, 0);
                 const pct = total > 0 ? ((item.value / total) * 100).toFixed(0) : "0";
                 return (
                   <div key={item.name} className="py-1 border-b border-neutral-100 flex flex-col">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 min-w-0">
                       <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: item.fill }} />
                       <span className="text-[10px] font-medium text-neutral-600 truncate">{item.name}</span>
                     </div>
@@ -253,17 +254,18 @@ export const ExpenseCategoryChart: React.FC<ExpenseCategoryChartProps> = ({
       title="Expense Distribution by Category"
       subtitle={
         workName
-          ? `Cost breakdown by category for ${workName} (₹${formatINR(totalExpense)})`
+          ? `Cost breakdown for ${workName} (₹${formatINR(totalExpense)})`
           : `All logged expenses by category (₹${formatINR(totalExpense)})`
       }
       isEmpty={categoryData.length === 0}
       emptyMessage="No expenses recorded for this project yet."
-      height={260}
+      height="auto"
+      className="min-h-[320px] sm:min-h-[260px]"
     >
-      <div className="w-full h-full flex flex-col sm:flex-row items-center justify-between gap-4">
-        {/* Donut Chart */}
-        <div className="w-full sm:w-1/2 h-[190px] relative">
-          <ResponsiveContainer width="100%" height="100%">
+      <div className="w-full flex flex-col sm:flex-row items-center justify-between gap-4 min-w-0">
+        {/* Donut Chart with explicit container */}
+        <div className="w-full sm:w-1/2 h-[190px] relative min-w-0 flex items-center justify-center">
+          <ResponsiveContainer width="100%" height={190} minWidth={0}>
             <PieChart>
               <Tooltip content={<CustomTooltip currency={true} titlePrefix="Category" />} />
               <Pie
@@ -291,7 +293,7 @@ export const ExpenseCategoryChart: React.FC<ExpenseCategoryChartProps> = ({
         </div>
 
         {/* Category Breakdown Table */}
-        <div className="w-full sm:w-1/2 space-y-1 overflow-y-auto max-h-[190px] pr-2">
+        <div className="w-full sm:w-1/2 space-y-1 overflow-y-auto max-h-[190px] min-w-0 sm:pr-2">
           {categoryData.map((item) => {
             const pct = totalExpense > 0 ? ((item.amount / totalExpense) * 100).toFixed(1) : "0";
             return (
@@ -299,13 +301,13 @@ export const ExpenseCategoryChart: React.FC<ExpenseCategoryChartProps> = ({
                 key={item.name}
                 className="flex items-center justify-between py-1 border-b border-neutral-100 text-xs"
               >
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 min-w-0">
                   <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.fill }} />
                   <span className="font-medium text-neutral-700 text-[11px] truncate max-w-[110px]">
                     {item.name}
                   </span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                   <span className="font-mono font-bold text-black text-[11px]">
                     ₹{formatINR(item.amount)}
                   </span>
@@ -351,37 +353,40 @@ export const StockInventoryChart: React.FC<StockInventoryChartProps> = ({
       subtitle="Total stocked vs consumed vs available balance in Tonnes"
       isEmpty={chartData.length === 0}
       emptyMessage="No stock inventory registered."
-      height={260}
+      height={250}
     >
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={chartData} margin={{ top: 15, right: 15, left: 10, bottom: 25 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-          <XAxis
-            dataKey="material"
-            tick={{ fontSize: 11, fill: "#525252", fontWeight: 600 }}
-            axisLine={{ stroke: "#e5e5e5" }}
-            tickLine={false}
-          />
-          <YAxis
-            tick={{ fontSize: 9, fill: "#737373" }}
-            axisLine={false}
-            tickLine={false}
-            tickFormatter={(val) => `${val} T`}
-          />
-          <Tooltip
-            content={<CustomTooltip currency={false} unit="Tonnes" titlePrefix="Material" />}
-          />
-          <Legend
-            verticalAlign="top"
-            align="right"
-            iconType="circle"
-            wrapperStyle={{ fontSize: "11px", paddingBottom: "8px" }}
-          />
-          <Bar dataKey="total" name="Total Inflow" fill="#171717" radius={[3, 3, 0, 0]} />
-          <Bar dataKey="used" name="Consumed on Sites" fill="#ef4444" radius={[3, 3, 0, 0]} />
-          <Bar dataKey="balance" name="Stock Balance" fill="#059669" radius={[3, 3, 0, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
+      <div className="w-full h-[250px] min-w-0">
+        <ResponsiveContainer width="100%" height={250} minWidth={0}>
+          <BarChart data={chartData} margin={{ top: 15, right: 10, left: -10, bottom: 25 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+            <XAxis
+              dataKey="material"
+              tick={{ fontSize: 11, fill: "#525252", fontWeight: 600 }}
+              axisLine={{ stroke: "#e5e5e5" }}
+              tickLine={false}
+            />
+            <YAxis
+              tick={{ fontSize: 9, fill: "#737373" }}
+              axisLine={false}
+              tickLine={false}
+              width={40}
+              tickFormatter={(val) => `${val}T`}
+            />
+            <Tooltip
+              content={<CustomTooltip currency={false} unit="Tonnes" titlePrefix="Material" />}
+            />
+            <Legend
+              verticalAlign="top"
+              align="right"
+              iconType="circle"
+              wrapperStyle={{ fontSize: "10px", paddingBottom: "6px" }}
+            />
+            <Bar dataKey="total" name="Total Inflow" fill="#171717" radius={[3, 3, 0, 0]} />
+            <Bar dataKey="used" name="Consumed" fill="#ef4444" radius={[3, 3, 0, 0]} />
+            <Bar dataKey="balance" name="Balance" fill="#059669" radius={[3, 3, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
     </ChartCard>
   );
 };
@@ -406,7 +411,7 @@ export const MaterialsReconciliationChart: React.FC<MaterialsReconciliationChart
 }) => {
   const chartData = useMemo(() => {
     return materialSummary.map((item) => ({
-      name: item.specName.length > 18 ? `${item.specName.substring(0, 16)}…` : item.specName,
+      name: item.specName.length > 15 ? `${item.specName.substring(0, 13)}…` : item.specName,
       fullName: item.specName,
       estimated: Math.round(item.estimated * 100) / 100,
       delivered: Math.round(item.delivered * 100) / 100,
@@ -424,35 +429,38 @@ export const MaterialsReconciliationChart: React.FC<MaterialsReconciliationChart
       }
       isEmpty={chartData.length === 0}
       emptyMessage="No material line items recorded for this work."
-      height={260}
+      height={250}
     >
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={chartData} margin={{ top: 15, right: 15, left: 10, bottom: 25 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-          <XAxis
-            dataKey="name"
-            tick={{ fontSize: 10, fill: "#525252" }}
-            axisLine={{ stroke: "#e5e5e5" }}
-            tickLine={false}
-          />
-          <YAxis
-            tick={{ fontSize: 9, fill: "#737373" }}
-            axisLine={false}
-            tickLine={false}
-          />
-          <Tooltip
-            content={<CustomTooltip currency={false} unit="Units" titlePrefix="Specification" />}
-          />
-          <Legend
-            verticalAlign="top"
-            align="right"
-            iconType="circle"
-            wrapperStyle={{ fontSize: "11px", paddingBottom: "8px" }}
-          />
-          <Bar dataKey="estimated" name="Estimated Quantity" fill="#2563eb" radius={[3, 3, 0, 0]} />
-          <Bar dataKey="delivered" name="Delivered to Site" fill="#059669" radius={[3, 3, 0, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
+      <div className="w-full h-[250px] min-w-0">
+        <ResponsiveContainer width="100%" height={250} minWidth={0}>
+          <BarChart data={chartData} margin={{ top: 15, right: 10, left: -10, bottom: 25 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+            <XAxis
+              dataKey="name"
+              tick={{ fontSize: 10, fill: "#525252" }}
+              axisLine={{ stroke: "#e5e5e5" }}
+              tickLine={false}
+            />
+            <YAxis
+              tick={{ fontSize: 9, fill: "#737373" }}
+              axisLine={false}
+              tickLine={false}
+              width={40}
+            />
+            <Tooltip
+              content={<CustomTooltip currency={false} unit="Units" titlePrefix="Specification" />}
+            />
+            <Legend
+              verticalAlign="top"
+              align="right"
+              iconType="circle"
+              wrapperStyle={{ fontSize: "10px", paddingBottom: "6px" }}
+            />
+            <Bar dataKey="estimated" name="Estimated" fill="#2563eb" radius={[3, 3, 0, 0]} />
+            <Bar dataKey="delivered" name="Delivered" fill="#059669" radius={[3, 3, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
     </ChartCard>
   );
 };
@@ -513,48 +521,52 @@ export const CementLoadTrendChart: React.FC<CementLoadTrendChartProps> = ({
       subtitle="Monthly bags delivered alongside paid amounts and outstanding supplier balance"
       isEmpty={chartData.length === 0}
       emptyMessage="No cement load entries recorded."
-      height={260}
+      height={250}
     >
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={chartData} margin={{ top: 15, right: 15, left: 10, bottom: 25 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-          <XAxis
-            dataKey="month"
-            tick={{ fontSize: 10, fill: "#525252" }}
-            axisLine={{ stroke: "#e5e5e5" }}
-            tickLine={false}
-          />
-          <YAxis
-            yAxisId="left"
-            tick={{ fontSize: 9, fill: "#737373" }}
-            axisLine={false}
-            tickLine={false}
-            tickFormatter={(val) => {
-              if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
-              if (val >= 1000) return `₹${(val / 1000).toFixed(0)}K`;
-              return `₹${val}`;
-            }}
-          />
-          <YAxis
-            yAxisId="right"
-            orientation="right"
-            tick={{ fontSize: 9, fill: "#737373" }}
-            axisLine={false}
-            tickLine={false}
-            tickFormatter={(val) => `${val} Bags`}
-          />
-          <Tooltip content={<CustomTooltip currency={true} titlePrefix="Period" />} />
-          <Legend
-            verticalAlign="top"
-            align="right"
-            iconType="circle"
-            wrapperStyle={{ fontSize: "11px", paddingBottom: "8px" }}
-          />
-          <Bar yAxisId="left" dataKey="paid" name="Paid Amount" fill="#059669" radius={[3, 3, 0, 0]} />
-          <Bar yAxisId="left" dataKey="balance" name="Balance Due" fill="#ef4444" radius={[3, 3, 0, 0]} />
-          <Bar yAxisId="right" dataKey="bags" name="Bags Purchased" fill="#171717" radius={[3, 3, 0, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
+      <div className="w-full h-[250px] min-w-0">
+        <ResponsiveContainer width="100%" height={250} minWidth={0}>
+          <BarChart data={chartData} margin={{ top: 15, right: 10, left: -10, bottom: 25 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+            <XAxis
+              dataKey="month"
+              tick={{ fontSize: 10, fill: "#525252" }}
+              axisLine={{ stroke: "#e5e5e5" }}
+              tickLine={false}
+            />
+            <YAxis
+              yAxisId="left"
+              tick={{ fontSize: 9, fill: "#737373" }}
+              axisLine={false}
+              tickLine={false}
+              width={45}
+              tickFormatter={(val) => {
+                if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
+                if (val >= 1000) return `₹${(val / 1000).toFixed(0)}K`;
+                return `₹${val}`;
+              }}
+            />
+            <YAxis
+              yAxisId="right"
+              orientation="right"
+              tick={{ fontSize: 9, fill: "#737373" }}
+              axisLine={false}
+              tickLine={false}
+              width={35}
+              tickFormatter={(val) => `${val}`}
+            />
+            <Tooltip content={<CustomTooltip currency={true} titlePrefix="Period" />} />
+            <Legend
+              verticalAlign="top"
+              align="right"
+              iconType="circle"
+              wrapperStyle={{ fontSize: "10px", paddingBottom: "6px" }}
+            />
+            <Bar yAxisId="left" dataKey="paid" name="Paid" fill="#059669" radius={[3, 3, 0, 0]} />
+            <Bar yAxisId="left" dataKey="balance" name="Balance" fill="#ef4444" radius={[3, 3, 0, 0]} />
+            <Bar yAxisId="right" dataKey="bags" name="Bags" fill="#171717" radius={[3, 3, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
     </ChartCard>
   );
 };
@@ -573,7 +585,6 @@ export const TarLoadTrendChart: React.FC<TarLoadTrendChartProps> = ({
   const chartData = useMemo(() => {
     if (!tarLoads || tarLoads.length === 0) return [];
 
-    // Group by item type (RS1, SS1, VG30, etc.)
     const itemMap: Record<string, { qtyKg: number; amount: number; paid: number; balance: number }> = {};
 
     tarLoads.forEach((tl) => {
@@ -601,48 +612,52 @@ export const TarLoadTrendChart: React.FC<TarLoadTrendChartProps> = ({
       subtitle="Purchased quantity (Metric Tons) and payment balance by emulsion grade"
       isEmpty={chartData.length === 0}
       emptyMessage="No tar load records logged."
-      height={260}
+      height={250}
     >
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={chartData} margin={{ top: 15, right: 15, left: 10, bottom: 25 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-          <XAxis
-            dataKey="item"
-            tick={{ fontSize: 10, fill: "#525252", fontWeight: 600 }}
-            axisLine={{ stroke: "#e5e5e5" }}
-            tickLine={false}
-          />
-          <YAxis
-            yAxisId="left"
-            tick={{ fontSize: 9, fill: "#737373" }}
-            axisLine={false}
-            tickLine={false}
-            tickFormatter={(val) => {
-              if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
-              if (val >= 1000) return `₹${(val / 1000).toFixed(0)}K`;
-              return `₹${val}`;
-            }}
-          />
-          <YAxis
-            yAxisId="right"
-            orientation="right"
-            tick={{ fontSize: 9, fill: "#737373" }}
-            axisLine={false}
-            tickLine={false}
-            tickFormatter={(val) => `${val} T`}
-          />
-          <Tooltip content={<CustomTooltip currency={true} titlePrefix="Grade" />} />
-          <Legend
-            verticalAlign="top"
-            align="right"
-            iconType="circle"
-            wrapperStyle={{ fontSize: "11px", paddingBottom: "8px" }}
-          />
-          <Bar yAxisId="left" dataKey="paid" name="Paid Amount" fill="#059669" radius={[3, 3, 0, 0]} />
-          <Bar yAxisId="left" dataKey="balance" name="Balance Due" fill="#ef4444" radius={[3, 3, 0, 0]} />
-          <Bar yAxisId="right" dataKey="quantityTons" name="Weight (Tons)" fill="#171717" radius={[3, 3, 0, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
+      <div className="w-full h-[250px] min-w-0">
+        <ResponsiveContainer width="100%" height={250} minWidth={0}>
+          <BarChart data={chartData} margin={{ top: 15, right: 10, left: -10, bottom: 25 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+            <XAxis
+              dataKey="item"
+              tick={{ fontSize: 10, fill: "#525252", fontWeight: 600 }}
+              axisLine={{ stroke: "#e5e5e5" }}
+              tickLine={false}
+            />
+            <YAxis
+              yAxisId="left"
+              tick={{ fontSize: 9, fill: "#737373" }}
+              axisLine={false}
+              tickLine={false}
+              width={45}
+              tickFormatter={(val) => {
+                if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
+                if (val >= 1000) return `₹${(val / 1000).toFixed(0)}K`;
+                return `₹${val}`;
+              }}
+            />
+            <YAxis
+              yAxisId="right"
+              orientation="right"
+              tick={{ fontSize: 9, fill: "#737373" }}
+              axisLine={false}
+              tickLine={false}
+              width={35}
+              tickFormatter={(val) => `${val}T`}
+            />
+            <Tooltip content={<CustomTooltip currency={true} titlePrefix="Grade" />} />
+            <Legend
+              verticalAlign="top"
+              align="right"
+              iconType="circle"
+              wrapperStyle={{ fontSize: "10px", paddingBottom: "6px" }}
+            />
+            <Bar yAxisId="left" dataKey="paid" name="Paid" fill="#059669" radius={[3, 3, 0, 0]} />
+            <Bar yAxisId="left" dataKey="balance" name="Balance" fill="#ef4444" radius={[3, 3, 0, 0]} />
+            <Bar yAxisId="right" dataKey="quantityTons" name="Weight" fill="#171717" radius={[3, 3, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
     </ChartCard>
   );
 };
@@ -668,12 +683,12 @@ export const BoqDistributionChart: React.FC<BoqDistributionChartProps> = ({
   const chartData = useMemo(() => {
     return boqItems
       .map((item) => ({
-        name: item.itemName.length > 20 ? `${item.itemName.substring(0, 18)}…` : item.itemName,
+        name: item.itemName.length > 18 ? `${item.itemName.substring(0, 16)}…` : item.itemName,
         fullName: item.itemName,
         amount: Math.round(item.totalAmountPerItem),
       }))
       .sort((a, b) => b.amount - a.amount)
-      .slice(0, 8); // Top 8 items
+      .slice(0, 8);
   }, [boqItems]);
 
   const totalValue = useMemo(
@@ -693,35 +708,37 @@ export const BoqDistributionChart: React.FC<BoqDistributionChartProps> = ({
       emptyMessage="No BOQ line items added yet."
       height={250}
     >
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart
-          data={chartData}
-          layout="vertical"
-          margin={{ top: 10, right: 20, left: 10, bottom: 5 }}
-        >
-          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
-          <XAxis
-            type="number"
-            tick={{ fontSize: 9, fill: "#737373" }}
-            axisLine={{ stroke: "#e5e5e5" }}
-            tickFormatter={(val) => {
-              if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
-              if (val >= 1000) return `₹${(val / 1000).toFixed(0)}K`;
-              return `₹${val}`;
-            }}
-          />
-          <YAxis
-            type="category"
-            dataKey="name"
-            tick={{ fontSize: 9, fill: "#525252" }}
-            axisLine={false}
-            tickLine={false}
-            width={130}
-          />
-          <Tooltip content={<CustomTooltip currency={true} titlePrefix="BOQ Specification" />} />
-          <Bar dataKey="amount" name="Estimated Amount" fill="#171717" radius={[0, 4, 4, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
+      <div className="w-full h-[250px] min-w-0">
+        <ResponsiveContainer width="100%" height={250} minWidth={0}>
+          <BarChart
+            data={chartData}
+            layout="vertical"
+            margin={{ top: 10, right: 15, left: -10, bottom: 5 }}
+          >
+            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
+            <XAxis
+              type="number"
+              tick={{ fontSize: 9, fill: "#737373" }}
+              axisLine={{ stroke: "#e5e5e5" }}
+              tickFormatter={(val) => {
+                if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
+                if (val >= 1000) return `₹${(val / 1000).toFixed(0)}K`;
+                return `₹${val}`;
+              }}
+            />
+            <YAxis
+              type="category"
+              dataKey="name"
+              tick={{ fontSize: 9, fill: "#525252" }}
+              axisLine={false}
+              tickLine={false}
+              width={110}
+            />
+            <Tooltip content={<CustomTooltip currency={true} titlePrefix="Specification" />} />
+            <Bar dataKey="amount" name="Estimated Amount" fill="#171717" radius={[0, 4, 4, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
     </ChartCard>
   );
 };
@@ -757,11 +774,12 @@ export const DlpDistributionChart: React.FC<DlpDistributionChartProps> = ({
       subtitle={`${total} contracts monitored for Defect Liability compliance`}
       isEmpty={chartData.length === 0}
       emptyMessage="No completed contracts currently evaluated for DLP."
-      height={220}
+      height="auto"
+      className="min-h-[280px] sm:min-h-[220px]"
     >
-      <div className="w-full h-full flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="w-full sm:w-1/2 h-[160px] relative">
-          <ResponsiveContainer width="100%" height="100%">
+      <div className="w-full flex flex-col sm:flex-row items-center justify-between gap-4 min-w-0">
+        <div className="w-full sm:w-1/2 h-[160px] relative min-w-0 flex items-center justify-center">
+          <ResponsiveContainer width="100%" height={160} minWidth={0}>
             <PieChart>
               <Tooltip content={<CustomTooltip currency={false} unit="Contracts" titlePrefix="DLP Status" />} />
               <Pie
@@ -785,16 +803,16 @@ export const DlpDistributionChart: React.FC<DlpDistributionChartProps> = ({
             <span className="text-[8px] uppercase font-bold text-neutral-400">Contracts</span>
           </div>
         </div>
-        <div className="w-full sm:w-1/2 space-y-1.5 pr-2">
+        <div className="w-full sm:w-1/2 space-y-1.5 min-w-0 sm:pr-2">
           {chartData.map((item) => {
             const pct = total > 0 ? ((item.count / total) * 100).toFixed(0) : "0";
             return (
               <div key={item.name} className="flex items-center justify-between py-1 border-b border-neutral-100 text-xs">
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 min-w-0">
                   <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.fill }} />
-                  <span className="text-[10px] font-medium text-neutral-700">{item.name}</span>
+                  <span className="text-[10px] font-medium text-neutral-700 truncate">{item.name}</span>
                 </div>
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 shrink-0">
                   <span className="font-mono font-bold text-[11px] text-black">{item.count}</span>
                   <span className="font-mono text-[9px] text-neutral-400 w-7 text-right">{pct}%</span>
                 </div>

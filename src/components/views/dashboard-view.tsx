@@ -228,11 +228,11 @@ export default function DashboardView({ data, onNavigate }: DashboardViewProps) 
       </div>
 
       {/* Executive Analytics & Operational Intelligence Section */}
-      <div className="space-y-4">
+      <div className="space-y-4 min-w-0">
         <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400 pb-2 border-b border-neutral-100">
           Executive Analytics & Operational Intelligence
         </h3>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 min-w-0">
           <ProjectStatusChart entries={entries} privateWorks={privateWorks} />
           <FinancialOverviewChart
             portfolioValuation={portfolioValuation}
@@ -241,7 +241,7 @@ export default function DashboardView({ data, onNavigate }: DashboardViewProps) 
             realizedProfit={realizedProfit}
           />
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 min-w-0">
           <ExpenseTrendChart expenses={expenses} />
           <WorkFinancialComparisonChart
             entries={entries}

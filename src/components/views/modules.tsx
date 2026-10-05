@@ -540,7 +540,7 @@ export function CementLoadView({
       </div>
 
       {/* Monthly Cement Procurement & Payment Status Chart */}
-      <div className="print:hidden">
+      <div className="print:hidden min-w-0">
         <CementLoadTrendChart cementLoads={displayedCementLoads} />
       </div>
 
@@ -2064,7 +2064,7 @@ export function StockRegisterView({
       </div>
 
       {/* Raw Material Inventory & Consumption Chart */}
-      <div className="print:hidden">
+      <div className="print:hidden min-w-0">
         <StockInventoryChart stockItems={stockItems} />
       </div>
 
@@ -2539,7 +2539,7 @@ export function MaterialsUsedView({
           </div>
 
           {/* Material Reconciliation Visual Chart */}
-          <div className="print:hidden">
+          <div className="print:hidden min-w-0">
             <MaterialsReconciliationChart
               materialSummary={materialSummary}
               workName={work?.workName}
@@ -3676,7 +3676,7 @@ export function TarLoadView({
       </div>
 
       {/* Bitumen Aggregate Procurement & Balance Chart */}
-      <div className="print:hidden">
+      <div className="print:hidden min-w-0">
         <TarLoadTrendChart tarLoads={displayedTarLoads} />
       </div>
 
@@ -4194,7 +4194,7 @@ export function WorkBasedEntryView({
           </div>
 
           {/* BOQ Specification Valuation Breakdown Chart */}
-          <div className="print:hidden">
+          <div className="print:hidden min-w-0">
             <BoqDistributionChart
               boqItems={filteredItems}
               workName={selectedWorkName}
@@ -4824,7 +4824,7 @@ export function WorkBasedRegisterView({
           </div>
 
           {/* Visual Financial Comparison for Selected Work */}
-          <div className="print:hidden">
+          <div className="print:hidden min-w-0">
             <FinancialOverviewChart
               portfolioValuation={selectedWork.amount}
               totalExpenses={totalWorkExpenses}
@@ -5115,7 +5115,7 @@ export function WorkStatusUpdationView({
       </div>
 
       {/* Overall Contracts Status Overview */}
-      <div className="print:hidden">
+      <div className="print:hidden min-w-0">
         <ProjectStatusChart entries={entries} privateWorks={[]} />
       </div>
 
@@ -5548,7 +5548,7 @@ export function ExpenseUpdationView({
 
       {/* Overall Tenant Expense Category Summary when no specific work is filtered */}
       {!selectedEntryId && expenses.length > 0 && (
-        <div className="print:hidden">
+        <div className="print:hidden min-w-0">
           <ExpenseCategoryChart
             expenses={expenses}
             workName="All Active Works"
@@ -5583,7 +5583,7 @@ export function ExpenseUpdationView({
           </div>
 
           {/* Project Expense Category Breakdown */}
-          <div className="print:hidden">
+          <div className="print:hidden min-w-0">
             <ExpenseCategoryChart
               expenses={filteredExpenses}
               workName={selectedExpenseWorkName}
@@ -6030,7 +6030,7 @@ export function ProfitCalculationView({
             </div>
 
             {/* Visual Profit & Cost Breakdown Analytics */}
-            <div className="pt-4 border-t border-neutral-100">
+            <div className="pt-4 border-t border-neutral-100 min-w-0">
               <ProfitBreakdownChart
                 agreedAmountWithGST={agreedAmountWithGST}
                 materialsCost={materialsCost}
@@ -6173,7 +6173,7 @@ export function DlpNotificationsView({
       </div>
 
       {/* DLP Compliance & Risk Profile Distribution */}
-      <div className="print:hidden">
+      <div className="print:hidden min-w-0">
         <DlpDistributionChart
           expiredCount={expiredList.length}
           expiringSoonCount={expiringSoonList.length}
