@@ -11,6 +11,20 @@ import {
 } from "@/lib/types";
 import { useToast } from "@/components/ui/toast";
 import { evaluateDlpStatus } from "@/lib/dlp-utils";
+import {
+  ProfitBreakdownChart,
+  ExpenseCategoryChart,
+  StockInventoryChart,
+  MaterialsReconciliationChart,
+  CementLoadTrendChart,
+  TarLoadTrendChart,
+  BoqDistributionChart,
+  DlpDistributionChart,
+} from "@/components/charts/module-charts";
+import {
+  FinancialOverviewChart,
+  ProjectStatusChart,
+} from "@/components/charts/dashboard-charts";
 
 // Helper for escaping HTML strings
 const escapeHtml = (str: string): string => {
@@ -133,7 +147,13 @@ const exportCSV = (data: any[], filename: string) => {
   const headers = Object.keys(data[0]).join(",");
   const rows = data.map(obj =>
     Object.values(obj).map(val => {
-      let str = String(val).replace(/"/g, '""');
+      let formattedVal = val;
+      if (val instanceof Date) {
+        formattedVal = formatDateDisplay(val);
+      } else if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}/.test(val)) {
+        formattedVal = formatDateDisplay(val);
+      }
+      let str = String(formattedVal ?? "").replace(/"/g, '""');
       return `"${str}"`;
     }).join(",")
   );
@@ -146,23 +166,63 @@ const exportCSV = (data: any[], filename: string) => {
   document.body.removeChild(link);
 };
 
-const formatDate = (date: any): string => {
-  if (!date) return "";
-  const d = typeof date === 'string' ? new Date(date) : date;
-  if (d instanceof Date && !isNaN(d.getTime())) {
-    return d.toISOString().substring(0, 10);
-  }
-  return "";
+// ── STANDARDIZED TIMEZONE-SAFE DATE UTILITIES ──────────────────────────────
+export const getTodayLocalString = (): string => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
+
+/**
+ * Converts any Date object or string to YYYY-MM-DD for native <input type="date">
+ * Safe against UTC / local timezone day shifts.
+ */
+export const formatDateForInput = (dateInput: any): string => {
+  if (!dateInput) return "";
+  if (typeof dateInput === 'string') {
+    const isoMatch = dateInput.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (isoMatch) return isoMatch[1];
+  }
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return "";
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+/**
+ * Formats any Date object or string to user-facing DD/MM/YYYY
+ */
+export const formatDateDisplay = (dateInput: any): string => {
+  if (!dateInput) return "";
+  const ymd = formatDateForInput(dateInput);
+  if (!ymd || ymd.length < 10) return "";
+  const [year, month, day] = ymd.split('-');
+  return `${day}/${month}/${year}`;
+};
+
+/**
+ * Formats Date + Time to DD/MM/YYYY, hh:mm AM/PM
+ */
+export const formatDateTimeDisplay = (dateInput: any): string => {
+  if (!dateInput) return "";
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return "";
+  const datePart = formatDateDisplay(d);
+  const timePart = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+  return `${datePart}, ${timePart}`;
+};
+
+// Aliased as formatDate for backwards compatibility throughout views (displays DD/MM/YYYY)
+const formatDate = (date: any): string => formatDateDisplay(date);
 
 // ==========================================
 // MODULE 1 – CEMENT LOAD UPDATION
 // ==========================================
 
-// Single form state object — replacing 22 individual useState calls.
-// This is the key fix: clearForm() now calls ONE setState instead of 22,
-// eliminating the multi-render cascade that was blocking the browser from
-// painting the optimistic row.
 const CEMENT_FORM_EMPTY = {
   purchasedFrom: "",
   cementCompany: "",
@@ -170,7 +230,7 @@ const CEMENT_FORM_EMPTY = {
   loadInBags: 0,
   amountPerLoad: 0,
   paidAmount: 0,
-  purchaseDate: "",
+  purchaseDate: getTodayLocalString(),
   buyerName: "",
   invoiceNumber: "",
   remarks: "",
@@ -202,38 +262,40 @@ export function CementLoadView({
   onCreateCementLoad: (data: any) => Promise<any>;
   onUpdateCementLoad: (id: string, data: any) => Promise<any>;
   onDeleteCementLoad: (id: string) => Promise<any>;
-  onOptimisticUpdate?: (updatedItem: CementLoad) => void;
+  onOptimisticUpdate?: (load: CementLoad) => void;
   onOptimisticDelete?: (id: string) => void;
   onNavigate: (tab: string) => void;
 }) {
   const toast = useToast();
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
-  const [expandedCementLoadId, setExpandedCementLoadId] = useState<string | null>(null);
-  const [isStockUnlocked, setIsStockUnlocked] = useState(false);
-
-  // Single form state object
   const [form, setForm] = useState<CementFormState>(CEMENT_FORM_EMPTY);
   const setField = <K extends keyof CementFormState>(key: K, value: CementFormState[K]) =>
     setForm(prev => ({ ...prev, [key]: value }));
 
-  const [pendingCementLoads, setPendingCementLoads] = useState<CementLoad[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [expandedCementLoadId, setExpandedCementLoadId] = useState<string | null>(null);
+  const [isStockUnlocked, setIsStockUnlocked] = useState(false);
+
+  const [pendingCementLoads, setPendingCementLoads] = useState<CementLoad[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const todayStr = getTodayLocalString();
 
   const displayedCementLoads = useMemo(() => {
     const combined = [...pendingCementLoads, ...cementLoads];
     if (!searchQuery) return combined;
     const q = searchQuery.toLowerCase();
-    return combined.filter(c =>
-      (c.purchasedFrom?.toLowerCase() || "").includes(q) ||
-      (c.cementCompany?.toLowerCase() || "").includes(q)
+    return combined.filter(l =>
+      (l.purchasedFrom?.toLowerCase() || "").includes(q) ||
+      (l.cementCompany?.toLowerCase() || "").includes(q) ||
+      (l.buyerName?.toLowerCase() || "").includes(q) ||
+      (l.invoiceNumber?.toLowerCase() || "").includes(q)
     );
   }, [pendingCementLoads, cementLoads, searchQuery]);
 
   const clearForm = () => {
-    setForm(CEMENT_FORM_EMPTY);
+    setForm({ ...CEMENT_FORM_EMPTY, purchaseDate: getTodayLocalString() });
     setIsStockUnlocked(false);
   };
 
@@ -241,24 +303,16 @@ export function CementLoadView({
     e.preventDefault();
     if (isSaving) return;
 
-    if (form.loadInTonne === undefined || form.loadInTonne === null || isNaN(Number(form.loadInTonne)) || Number(form.loadInTonne) < 0) {
-      toast.error("Invalid Tonne Value", "Load in Tonne must be 0 or greater.");
+    if (form.purchaseDate && form.purchaseDate > todayStr) {
+      toast.error("Future Date Not Allowed", "Purchase date cannot be in the future.");
       return;
     }
-
-    // Date Rule Validation: Future dates strictly blocked
-    const endOfToday = new Date();
-    endOfToday.setHours(23, 59, 59, 999);
-    if (form.purchaseDate && new Date(form.purchaseDate) > endOfToday) {
-      toast.error("Future dates not allowed", "Purchase date cannot be in the future.");
+    if (form.currentStockDate && form.currentStockDate > todayStr) {
+      toast.error("Future Date Not Allowed", "Current stock date cannot be in the future.");
       return;
     }
-    if (form.currentStockDate && new Date(form.currentStockDate) > endOfToday) {
-      toast.error("Future dates not allowed", "Current stock date cannot be in the future.");
-      return;
-    }
-    if (form.paymentBillDate && new Date(form.paymentBillDate) > endOfToday) {
-      toast.error("Future dates not allowed", "Payment bill date cannot be in the future.");
+    if (form.paymentBillDate && form.paymentBillDate > todayStr) {
+      toast.error("Future Date Not Allowed", "Payment bill date cannot be in the future.");
       return;
     }
 
@@ -314,7 +368,6 @@ export function CementLoadView({
     setShowForm(false);
     setIsSaving(false);
 
-    // Background Server Request & Seamless Reconciliation
     void (async () => {
       try {
         if (editId) {
@@ -328,11 +381,8 @@ export function CementLoadView({
         } else {
           const saved = await onCreateCementLoad(payload);
           if (saved && saved.id) {
-            // 1. Add authoritative server record to parent state
             onOptimisticUpdate?.(saved as unknown as CementLoad);
-            // 2. Remove temporary record from local pending array
             setPendingCementLoads(prev => prev.filter(item => item.id !== capturedOptimisticId));
-            // 3. Transfer expanded state if user expanded the optimistic row
             if (capturedOptimisticId) {
               setExpandedCementLoadId(prev => (prev === capturedOptimisticId ? saved.id : prev));
             }
@@ -365,18 +415,18 @@ export function CementLoadView({
       loadInBags: item.loadInBags,
       amountPerLoad: item.amountPerLoad,
       paidAmount: item.paidAmount,
-      purchaseDate: formatDate(item.purchaseDate),
+      purchaseDate: formatDateForInput(item.purchaseDate),
       buyerName: item.buyerName,
       invoiceNumber: item.invoiceNumber,
       remarks: item.remarks ?? "",
-      currentStockDate: formatDate(item.currentStockDate),
+      currentStockDate: formatDateForInput(item.currentStockDate),
       currentStockQty: item.currentStockQty ?? 0,
       currentStockUsed: item.currentStockUsed ?? 0,
       currentStockUsedAmount: item.currentStockUsedAmount ?? 0,
       currentStockBalanceAmount: item.currentStockBalanceAmount ?? 0,
       paymentPartyName: item.paymentPartyName ?? "",
       paymentBillAmount: item.paymentBillAmount ?? 0,
-      paymentBillDate: formatDate(item.paymentBillDate),
+      paymentBillDate: formatDateForInput(item.paymentBillDate),
       paymentPaidAmount: item.paymentPaidAmount ?? 0,
       paymentRemarks: item.paymentRemarks ?? "",
     });
@@ -487,6 +537,11 @@ export function CementLoadView({
           <div className="text-[10px] uppercase font-bold text-neutral-400">Total Balance Due</div>
           <div className="text-xl font-mono font-bold mt-1 text-black">₹{totalBalance.toLocaleString()}</div>
         </div>
+      </div>
+
+      {/* Monthly Cement Procurement & Payment Status Chart */}
+      <div className="print:hidden">
+        <CementLoadTrendChart cementLoads={displayedCementLoads} />
       </div>
 
       {showForm && (
@@ -1009,7 +1064,7 @@ export function EntryView({
   onNavigate: (tab: string) => void;
 }) {
   const toast = useToast();
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const todayStr = getTodayLocalString();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -1040,7 +1095,15 @@ export function EntryView({
     if (isSaving) return;
 
     if (form.actualCompletionDate && form.actualCompletionDate > todayStr) {
-      toast.error("Future dates not allowed", "Actual Date of Completion cannot be in the future.");
+      toast.error("Future Date Not Allowed", "Actual Date of Completion cannot be in the future.");
+      return;
+    }
+    if (form.actualCompletionDate && form.siteHandoverDate && form.actualCompletionDate < form.siteHandoverDate) {
+      toast.error("Invalid Date Range", "Actual Completion Date cannot be before Site Handover Date.");
+      return;
+    }
+    if (form.siteHandoverDate && form.workCompletionDateAsPerAgreement && form.siteHandoverDate > form.workCompletionDateAsPerAgreement) {
+      toast.error("Invalid Date Range", "Work Completion Date cannot be before Site Handover Date.");
       return;
     }
 
@@ -1140,15 +1203,15 @@ export function EntryView({
       mlaMpName: entry.mlaMpName || "",
       loaReceived: entry.loaReceived,
       gstApplicable: entry.gstApplicable || false,
-      lastDateToExecuteAgreement: formatDate(entry.lastDateToExecuteAgreement),
+      lastDateToExecuteAgreement: formatDateForInput(entry.lastDateToExecuteAgreement),
       amountOfStampPaperRequired: entry.amountOfStampPaperRequired,
       securityAmount: entry.securityAmount,
       performanceGuarantee: entry.performanceGuarantee,
       dlpPeriodAsPerInLOA: entry.dlpPeriodAsPerInLOA,
       agreementNo: entry.agreementNo,
-      siteHandoverDate: formatDate(entry.siteHandoverDate),
-      workCompletionDateAsPerAgreement: formatDate(entry.workCompletionDateAsPerAgreement),
-      actualCompletionDate: entry.actualCompletionDate ? formatDate(entry.actualCompletionDate) : "",
+      siteHandoverDate: formatDateForInput(entry.siteHandoverDate),
+      workCompletionDateAsPerAgreement: formatDateForInput(entry.workCompletionDateAsPerAgreement),
+      actualCompletionDate: entry.actualCompletionDate ? formatDateForInput(entry.actualCompletionDate) : "",
       wardMemberName: entry.wardMemberName || "",
       wardMemberPhone: entry.wardMemberPhone || "",
       overseerName: entry.overseerName || "",
@@ -2000,6 +2063,11 @@ export function StockRegisterView({
         })}
       </div>
 
+      {/* Raw Material Inventory & Consumption Chart */}
+      <div className="print:hidden">
+        <StockInventoryChart stockItems={stockItems} />
+      </div>
+
       {editingId && (
         <form onSubmit={handleSave} className="border border-neutral-300 bg-white p-5 rounded space-y-4">
           <h3 className="text-xs font-bold uppercase border-b border-neutral-200 pb-2 text-black">
@@ -2470,6 +2538,14 @@ export function MaterialsUsedView({
             </div>
           </div>
 
+          {/* Material Reconciliation Visual Chart */}
+          <div className="print:hidden">
+            <MaterialsReconciliationChart
+              materialSummary={materialSummary}
+              workName={work?.workName}
+            />
+          </div>
+
           {showItemForm && (
             <form onSubmit={handleAddItem} className="border border-black bg-white p-4 rounded space-y-4">
               <h4 className="text-xs font-bold uppercase border-b border-neutral-100 pb-2">
@@ -2762,7 +2838,7 @@ const PRIVATE_WORK_FORM_EMPTY = {
   approxAmount: 0,
   location: "",
   relatedToContractWork: "",
-  siteVisitDate: "",
+  siteVisitDate: getTodayLocalString(),
   roadWorkNature: "",
   completedDate: "",
   advanceReceived: 0,
@@ -2791,6 +2867,8 @@ export function PrivateWorkView({
   onOptimisticDelete?: (id: string) => void;
   onNavigate: (tab: string) => void;
 }) {
+  const toast = useToast();
+  const todayStr = getTodayLocalString();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -2814,11 +2892,21 @@ export function PrivateWorkView({
     );
   }, [pendingPrivateWorks, privateWorks, searchQuery]);
 
-  const clearForm = () => setForm(PRIVATE_WORK_FORM_EMPTY);
+  const clearForm = () => setForm({ ...PRIVATE_WORK_FORM_EMPTY, siteVisitDate: getTodayLocalString() });
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (isSaving) return;
+
+    if (form.siteVisitDate && form.siteVisitDate > todayStr) {
+      toast.error("Future Date Not Allowed", "Site Visit Date cannot be in the future.");
+      return;
+    }
+    if (form.siteVisitDate && form.completedDate && form.completedDate < form.siteVisitDate) {
+      toast.error("Invalid Date Range", "Target Completion Date cannot be before Site Visit Date.");
+      return;
+    }
+
     setIsSaving(true);
 
     const payload = {
@@ -2881,7 +2969,7 @@ export function PrivateWorkView({
         if (capturedOptimisticId) {
           setPendingPrivateWorks(prev => prev.filter(item => item.id !== capturedOptimisticId));
         }
-        alert('Failed to save private work. Please try again.');
+        toast.error("Failed to save private work.");
         await onRefresh();
       }
     })();
@@ -2894,9 +2982,9 @@ export function PrivateWorkView({
       approxAmount: w.approxAmount,
       location: w.location,
       relatedToContractWork: w.relatedToContractWork || "",
-      siteVisitDate: formatDate(w.siteVisitDate),
+      siteVisitDate: formatDateForInput(w.siteVisitDate),
       roadWorkNature: w.roadWorkNature,
-      completedDate: formatDate(w.completedDate),
+      completedDate: formatDateForInput(w.completedDate),
       advanceReceived: w.advanceReceived,
       approxFinalWorkAmount: w.approxFinalWorkAmount,
       paymentReceived: w.paymentReceived,
@@ -3342,7 +3430,7 @@ const TAR_LOAD_FORM_EMPTY = {
   addressedOffice: "",
   amountPerLoad: 0,
   paidAmount: 0,
-  purchasedDate: "",
+  purchasedDate: getTodayLocalString(),
   billingNameBuyer: "",
   remarks: "",
 };
@@ -3367,6 +3455,8 @@ export function TarLoadView({
   onOptimisticDelete?: (id: string) => void;
   onNavigate: (tab: string) => void;
 }) {
+  const toast = useToast();
+  const todayStr = getTodayLocalString();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -3389,11 +3479,17 @@ export function TarLoadView({
     );
   }, [pendingTarLoads, tarLoads, searchQuery]);
 
-  const clearForm = () => setForm(TAR_LOAD_FORM_EMPTY);
+  const clearForm = () => setForm({ ...TAR_LOAD_FORM_EMPTY, purchasedDate: getTodayLocalString() });
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (saving) return;
+
+    if (form.purchasedDate && form.purchasedDate > todayStr) {
+      toast.error("Future Date Not Allowed", "Purchased date cannot be in the future.");
+      return;
+    }
+
     setSaving(true);
 
     const payload = {
@@ -3455,7 +3551,7 @@ export function TarLoadView({
         if (capturedOptimisticId) {
           setPendingTarLoads(prev => prev.filter(item => item.id !== capturedOptimisticId));
         }
-        alert('Failed to save tar load. Please try again.');
+        toast.error('Failed to save tar load.');
         await onRefresh();
       }
     })();
@@ -3471,7 +3567,7 @@ export function TarLoadView({
       addressedOffice: load.addressedOffice,
       amountPerLoad: load.amountPerLoad || 0,
       paidAmount: load.paidAmount,
-      purchasedDate: formatDate(load.purchasedDate),
+      purchasedDate: formatDateForInput(load.purchasedDate),
       billingNameBuyer: load.billingNameBuyer,
       remarks: load.remarks || "",
     });
@@ -3577,6 +3673,11 @@ export function TarLoadView({
           <div className="text-[10px] uppercase font-bold text-neutral-400">Outstanding Balance</div>
           <div className="text-xl font-mono font-bold mt-1 text-black">₹{totalBalance.toLocaleString()}</div>
         </div>
+      </div>
+
+      {/* Bitumen Aggregate Procurement & Balance Chart */}
+      <div className="print:hidden">
+        <TarLoadTrendChart tarLoads={displayedTarLoads} />
       </div>
 
       {showForm && (
@@ -4090,6 +4191,14 @@ export function WorkBasedEntryView({
                 </button>
               )}
             </div>
+          </div>
+
+          {/* BOQ Specification Valuation Breakdown Chart */}
+          <div className="print:hidden">
+            <BoqDistributionChart
+              boqItems={filteredItems}
+              workName={selectedWorkName}
+            />
           </div>
 
           {showForm && (
@@ -4607,7 +4716,7 @@ export function WorkBasedRegisterView({
                 </div>
                 <div>
                   <span className="text-neutral-400 block text-[9px] uppercase font-bold">Last Date to Execute Agreement</span>
-                  <span className="font-mono font-semibold text-neutral-900">{selectedWork.original.lastDateToExecuteAgreement ? new Date(selectedWork.original.lastDateToExecuteAgreement).toISOString().substring(0,10) : ""}</span>
+                  <span className="font-mono font-semibold text-neutral-900">{selectedWork.original.lastDateToExecuteAgreement ? formatDateDisplay(selectedWork.original.lastDateToExecuteAgreement) : ""}</span>
                 </div>
                 <div>
                   <span className="text-neutral-400 block text-[9px] uppercase font-bold">DLP Period</span>
@@ -4654,11 +4763,11 @@ export function WorkBasedRegisterView({
                 </div>
                 <div>
                   <span className="text-neutral-400 block text-[9px] uppercase font-bold">Site Visit Date</span>
-                  <span className="font-mono font-semibold text-neutral-900">{selectedWork.original.siteVisitDate ? new Date(selectedWork.original.siteVisitDate).toISOString().substring(0,10) : "N/A"}</span>
+                  <span className="font-mono font-semibold text-neutral-900">{selectedWork.original.siteVisitDate ? formatDateDisplay(selectedWork.original.siteVisitDate) : "N/A"}</span>
                 </div>
                 <div>
                   <span className="text-neutral-400 block text-[9px] uppercase font-bold">Completion Target</span>
-                  <span className="font-mono font-semibold text-neutral-900">{selectedWork.original.completedDate ? new Date(selectedWork.original.completedDate).toISOString().substring(0,10) : "N/A"}</span>
+                  <span className="font-mono font-semibold text-neutral-900">{selectedWork.original.completedDate ? formatDateDisplay(selectedWork.original.completedDate) : "N/A"}</span>
                 </div>
               </div>
 
@@ -4712,6 +4821,16 @@ export function WorkBasedRegisterView({
                 </span>
               </div>
             </div>
+          </div>
+
+          {/* Visual Financial Comparison for Selected Work */}
+          <div className="print:hidden">
+            <FinancialOverviewChart
+              portfolioValuation={selectedWork.amount}
+              totalExpenses={totalWorkExpenses}
+              projectedProfit={projectedProfit}
+              realizedProfit={realizedProfit}
+            />
           </div>
 
           {/* Item Wise Table */}
@@ -4995,6 +5114,11 @@ export function WorkStatusUpdationView({
         <p className="text-xs text-neutral-500 font-medium">Select an active contract to modify field logs, execute revisions, and toggle completion states.</p>
       </div>
 
+      {/* Overall Contracts Status Overview */}
+      <div className="print:hidden">
+        <ProjectStatusChart entries={entries} privateWorks={[]} />
+      </div>
+
       {/* Search Input */}
       <div className="relative w-64 mb-4">
         <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-neutral-400" />
@@ -5254,7 +5378,7 @@ export function ExpenseUpdationView({
   };
 
   const clearForm = () => {
-    setDate(getLocalDateString());
+    setDate(getTodayLocalString());
     setDescription("Labour");
     setCustomDescription("");
     setAmount("");
@@ -5264,8 +5388,8 @@ export function ExpenseUpdationView({
     e.preventDefault();
     if (!selectedEntryId || isSaving) return;
 
-    if (date > getLocalDateString()) {
-      toast.error("Invalid Date", "Future transaction dates are not allowed.");
+    if (date && date > getTodayLocalString()) {
+      toast.error("Future Date Not Allowed", "Expense date cannot be in the future.");
       return;
     }
 
@@ -5332,7 +5456,7 @@ export function ExpenseUpdationView({
 
   const handleEdit = (exp: Expense) => {
     setEditingId(exp.id);
-    setDate(formatDate(exp.date));
+    setDate(formatDateForInput(exp.date));
     if (descriptionOptions.includes(exp.description)) {
       setDescription(exp.description);
       setCustomDescription("");
@@ -5371,19 +5495,6 @@ export function ExpenseUpdationView({
     ...entries.map(e => ({ id: e.id, name: e.workName, type: 'entry' as const })),
     ...(privateWorks || []).map(p => ({ id: p.id, name: p.workName, type: 'private' as const }))
   ].filter(opt => opt.name.toLowerCase().includes(searchQuery.toLowerCase()));
-
-  const formatDate = (date: string | Date) => {
-  if (!date) return "";
-  const dateStr = typeof date === "string" ? date : date.toISOString();
-  const parts = dateStr.substring(0, 10).split("-");
-  if (parts.length !== 3) return dateStr;
-  const year = parts[0].substring(2);
-  const month = parts[1];
-  const day = parts[2];
-  return `${day}/${month}/${year}`;
-};
-
-;
 
   const selectedExpenseWorkName = filteredWorkOptions.find(o => o.id === selectedEntryId)?.name || "";
 
@@ -5435,6 +5546,16 @@ export function ExpenseUpdationView({
         </div>
       </div>
 
+      {/* Overall Tenant Expense Category Summary when no specific work is filtered */}
+      {!selectedEntryId && expenses.length > 0 && (
+        <div className="print:hidden">
+          <ExpenseCategoryChart
+            expenses={expenses}
+            workName="All Active Works"
+          />
+        </div>
+      )}
+
       {selectedEntryId && (
         <div className="space-y-6 animate-fade-in">
           <div className="flex justify-between items-center bg-neutral-50 p-4 border border-neutral-200 rounded">
@@ -5459,6 +5580,14 @@ export function ExpenseUpdationView({
                 </button>
               )}
             </div>
+          </div>
+
+          {/* Project Expense Category Breakdown */}
+          <div className="print:hidden">
+            <ExpenseCategoryChart
+              expenses={filteredExpenses}
+              workName={selectedExpenseWorkName}
+            />
           </div>
 
           {showForm && (
@@ -5765,7 +5894,7 @@ export function ProfitCalculationView({
   };
 
   return (
-    <div className="space-y-6 max-w-xl mx-auto animate-fade-in text-black print:p-0 print:max-w-none print:m-0 w-full">
+    <div className="space-y-6 max-w-4xl mx-auto animate-fade-in text-black print:p-0 print:max-w-none print:m-0 w-full">
       <div className="print:hidden">
         <h2 className="text-xl font-bold tracking-tight uppercase">Profit Calculation</h2>
         <p className="text-xs text-neutral-500 font-medium">Auto-calculated project profitability register synced with Materials & Expenses.</p>
@@ -5899,6 +6028,20 @@ export function ProfitCalculationView({
                 ₹{overallProfit.toLocaleString()}
               </span>
             </div>
+
+            {/* Visual Profit & Cost Breakdown Analytics */}
+            <div className="pt-4 border-t border-neutral-100">
+              <ProfitBreakdownChart
+                agreedAmountWithGST={agreedAmountWithGST}
+                materialsCost={materialsCost}
+                executionExpense={executionExpense}
+                totalExpenseWithGST={totalExpenseWithGST}
+                overallProfit={overallProfit}
+                profitPercentage={profitPercentage}
+                workName={selectedWork.name}
+                gstAmount={gstAmount}
+              />
+            </div>
           </div>
 
           {/* Action Buttons */}
@@ -6027,6 +6170,15 @@ export function DlpNotificationsView({
           <div className="text-2xl font-mono font-bold mt-1 text-black">{activeList.length}</div>
           <div className="text-[10px] text-neutral-500 mt-1">Currently within defect warranty period</div>
         </div>
+      </div>
+
+      {/* DLP Compliance & Risk Profile Distribution */}
+      <div className="print:hidden">
+        <DlpDistributionChart
+          expiredCount={expiredList.length}
+          expiringSoonCount={expiringSoonList.length}
+          activeCount={activeList.length}
+        />
       </div>
 
       {/* Filter Tabs & Search */}

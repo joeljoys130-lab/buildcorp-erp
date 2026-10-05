@@ -8,6 +8,12 @@ import {
 import { CementLoad, Entry, StockRegisterItem, PrivateWork, TarLoad, WorkBasedEntry, Expense } from "@/lib/types";
 
 import { evaluateDlpStatus } from "@/lib/dlp-utils";
+import {
+  ProjectStatusChart,
+  FinancialOverviewChart,
+  ExpenseTrendChart,
+  WorkFinancialComparisonChart,
+} from "@/components/charts/dashboard-charts";
 
 interface DashboardViewProps {
   data: {
@@ -218,6 +224,30 @@ export default function DashboardView({ data, onNavigate }: DashboardViewProps) 
               <span>Realized Cash Profit: ₹{formatNumber(realizedProfit)}</span>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Executive Analytics & Operational Intelligence Section */}
+      <div className="space-y-4">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400 pb-2 border-b border-neutral-100">
+          Executive Analytics & Operational Intelligence
+        </h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <ProjectStatusChart entries={entries} privateWorks={privateWorks} />
+          <FinancialOverviewChart
+            portfolioValuation={portfolioValuation}
+            totalExpenses={totalExpenses}
+            projectedProfit={projectedProfit}
+            realizedProfit={realizedProfit}
+          />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <ExpenseTrendChart expenses={expenses} />
+          <WorkFinancialComparisonChart
+            entries={entries}
+            privateWorks={privateWorks}
+            expenses={expenses}
+          />
         </div>
       </div>
 
