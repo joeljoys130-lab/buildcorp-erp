@@ -31,8 +31,9 @@ import {
   CementLoadView, EntryView, StockRegisterView, MaterialsUsedView,
   PrivateWorkView, TarLoadView, WorkBasedEntryView, WorkBasedRegisterView,
   OfficeWiseWorkView, WorkStatusUpdationView, ExpenseUpdationView,
-  ProfitCalculationView, DlpNotificationsView, PublicWorksInsuranceView
+  ProfitCalculationView, DlpNotificationsView
 } from "./views/modules";
+import { PublicWorksInsuranceView } from "./views/public-works-insurance-view";
 import type {
   CementLoad, Entry, StockRegisterItem, SiteMaterial,
   PrivateWork, TarLoad, WorkBasedEntry, Expense, PublicWorksInsurance

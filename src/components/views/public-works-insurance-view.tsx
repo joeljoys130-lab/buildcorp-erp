@@ -9,11 +9,36 @@ import {
 } from "lucide-react";
 import { PublicWorksInsurance, Entry } from "@/lib/types";
 import { useToast } from "@/components/ui/toast";
-import {
-  formatDateForInput,
-  formatDateDisplay,
-  getTodayLocalString,
-} from "./modules";
+// Date formatting utilities (self-contained to prevent circular module dependencies)
+const getTodayLocalString = (): string => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const formatDateForInput = (dateInput: unknown): string => {
+  if (!dateInput) return "";
+  if (typeof dateInput === 'string') {
+    const isoMatch = dateInput.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (isoMatch) return isoMatch[1];
+  }
+  const d = new Date(dateInput as string | number | Date);
+  if (isNaN(d.getTime())) return "";
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const formatDateDisplay = (dateInput: unknown): string => {
+  if (!dateInput) return "";
+  const ymd = formatDateForInput(dateInput);
+  if (!ymd || ymd.length < 10) return "";
+  const [year, month, day] = ymd.split('-');
+  return `${day}/${month}/${year}`;
+};
 
 interface PublicWorksInsuranceViewProps {
   insuranceRecords: PublicWorksInsurance[];
