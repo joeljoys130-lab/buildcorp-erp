@@ -3,7 +3,8 @@
 import { useState } from "react";
 import {
   Building2, Layers, Package, Fuel, TrendingUp, Calendar, ArrowRight,
-  Award, FileText, CheckSquare, PlusCircle, BookOpen, Warehouse, Compass, X, AlertCircle
+  Award, FileText, CheckSquare, PlusCircle, BookOpen, Warehouse, Compass, X, AlertCircle,
+  ShieldCheck
 } from "lucide-react";
 import { CementLoad, Entry, StockRegisterItem, PrivateWork, TarLoad, WorkBasedEntry, Expense } from "@/lib/types";
 
@@ -114,6 +115,7 @@ export default function DashboardView({ data, onNavigate }: DashboardViewProps) 
   const modules = [
     { id: "cement-load", label: "Cement Load Updation", icon: Package, desc: "Record cement purchase bills, load bags, and monitor remaining balances." },
     { id: "entry", label: "Contract Entry", icon: FileText, desc: "Register government contracts, SLA timelines, stamp papers, and performance guarantees." },
+    { id: "public-works-insurance", label: "Public Works Insurance", icon: ShieldCheck, desc: "Manage insurance policies, agents, LOA dates, insurance fees, and insurance documents for active public works contracts." },
     { id: "dlp-notifications", label: "DLP Notifications", icon: AlertCircle, desc: "Monitor works whose Defect Liability Period has expired based on Actual Completion." },
     { id: "stock-register", label: "Stock Register", icon: Warehouse, desc: "Real-time stock ledger of Cement, RS1, SS1, and VG30 Bitumen aggregates." },
     { id: "materials-used", label: "Materials Used in Site", icon: Compass, desc: "Map and reconcile estimated deliverables against stock delivered to construction sites." },
