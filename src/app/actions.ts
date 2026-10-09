@@ -6,7 +6,9 @@ import { getTenantContextFromToken, assertPermission } from '@/lib/auth/tenant';
 import {
   CementLoad, Entry, StockRegisterItem, SiteMaterial,
   PrivateWork, TarLoad, WorkBasedEntry, Expense,
+  PublicWorksInsurance,
 } from '@/lib/types';
+import { deleteInsuranceDocument } from '@/lib/document-storage';
 
 // ── Auth & Tenant Context helper ───────────────────────────────────────────────
 
@@ -226,9 +228,53 @@ export async function deleteExpenseAction(id: string) {
   return dbService.deleteExpense(id, ctx.email);
 }
 
+// ── Public Works Insurance ────────────────────────────────────────────────────
+
+export async function getPublicWorksInsurancesAction() {
+  const ctx = await getTenantContext();
+  assertPermission(ctx, 'INSURANCE_VIEW');
+  return dbService.getPublicWorksInsurances(ctx.email);
+}
+
+export async function getEligiblePublicWorksAction() {
+  const ctx = await getTenantContext();
+  assertPermission(ctx, 'INSURANCE_VIEW');
+  return dbService.getEligiblePublicWorks(ctx.email);
+}
+
+export async function createPublicWorksInsuranceAction(
+  data: Omit<PublicWorksInsurance, 'id' | 'createdAt' | 'updatedAt'>
+) {
+  const ctx = await getTenantContext();
+  assertPermission(ctx, 'INSURANCE_CREATE');
+  return dbService.createPublicWorksInsurance(data, ctx.email);
+}
+
+export async function updatePublicWorksInsuranceAction(
+  id: string,
+  data: Partial<PublicWorksInsurance>
+) {
+  const ctx = await getTenantContext();
+  assertPermission(ctx, 'INSURANCE_UPDATE');
+  return dbService.updatePublicWorksInsurance(id, data, ctx.email);
+}
+
+export async function deletePublicWorksInsuranceAction(id: string) {
+  const ctx = await getTenantContext();
+  assertPermission(ctx, 'INSURANCE_DELETE');
+  return dbService.deletePublicWorksInsurance(id, ctx.email);
+}
+
+export async function deleteInsuranceDocumentAction(documentPath: string) {
+  const ctx = await getTenantContext();
+  assertPermission(ctx, 'INSURANCE_CREATE');
+  await deleteInsuranceDocument(documentPath, ctx.email);
+  return { success: true };
+}
+
 export async function getDashboardDataAction() {
   const ctx = await getTenantContext();
-  const [cl, ent, stk, sm, pw, tl, wbe, exp] = await Promise.all([
+  const [cl, ent, stk, sm, pw, tl, wbe, exp, ins] = await Promise.all([
     dbService.getCementLoads(ctx.email),
     dbService.getEntries(ctx.email),
     dbService.getStockRegister(ctx.email),
@@ -236,7 +282,8 @@ export async function getDashboardDataAction() {
     dbService.getPrivateWorks(ctx.email),
     dbService.getTarLoads(ctx.email),
     dbService.getWorkBasedEntries(ctx.email),
-    dbService.getExpenses(ctx.email)
+    dbService.getExpenses(ctx.email),
+    dbService.getPublicWorksInsurances(ctx.email),
   ]);
   return {
     cementLoads: cl,
@@ -246,7 +293,8 @@ export async function getDashboardDataAction() {
     privateWorks: pw,
     tarLoads: tl,
     workBasedEntries: wbe,
-    expenses: exp
+    expenses: exp,
+    insuranceRecords: ins,
   };
 }
 

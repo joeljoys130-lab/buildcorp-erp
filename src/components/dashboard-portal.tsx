@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import {
   Building2, Layers, Package, Fuel, Award, FileText, CheckSquare,
   PlusCircle, BookOpen, Warehouse, Compass, Menu, X, LogOut,
-  Receipt, TrendingUp, AlertCircle, Bell, BellRing
+  Receipt, TrendingUp, AlertCircle, Bell, BellRing, ShieldCheck
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { evaluateDlpStatus } from "@/lib/dlp-utils";
@@ -23,16 +23,20 @@ import {
   getSiteMaterialsAction, getPrivateWorksAction, getTarLoadsAction,
   getWorkBasedEntriesAction,
   createExpenseAction, updateExpenseAction, deleteExpenseAction, getExpensesAction,
-  getDashboardDataAction
+  getDashboardDataAction,
+  createPublicWorksInsuranceAction, updatePublicWorksInsuranceAction, deletePublicWorksInsuranceAction, getPublicWorksInsurancesAction
 } from "@/app/actions";
 import DashboardView from "./views/dashboard-view";
 import {
   CementLoadView, EntryView, StockRegisterView, MaterialsUsedView,
   PrivateWorkView, TarLoadView, WorkBasedEntryView, WorkBasedRegisterView,
   OfficeWiseWorkView, WorkStatusUpdationView, ExpenseUpdationView,
-  ProfitCalculationView, DlpNotificationsView
+  ProfitCalculationView, DlpNotificationsView, PublicWorksInsuranceView
 } from "./views/modules";
-import type { CementLoad, Entry, StockRegisterItem, SiteMaterial, PrivateWork, TarLoad, WorkBasedEntry, Expense } from "@/lib/types";
+import type {
+  CementLoad, Entry, StockRegisterItem, SiteMaterial,
+  PrivateWork, TarLoad, WorkBasedEntry, Expense, PublicWorksInsurance
+} from "@/lib/types";
 
 interface DashboardPortalProps {
   initialUser: any;
@@ -60,6 +64,7 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
   const [tarLoads, setTarLoads] = useState(initialData.tarLoads || []);
   const [workBasedEntries, setWorkBasedEntries] = useState(initialData.workBasedEntries || []);
   const [expenses, setExpenses] = useState(initialData.expenses || []);
+  const [insuranceRecords, setInsuranceRecords] = useState<PublicWorksInsurance[]>(initialData.insuranceRecords || []);
 
   // Push Notification & In-App Alerts State
   const [pushState, setPushState] = useState<'default' | 'granted' | 'denied' | 'unsupported'>('default');
@@ -110,6 +115,7 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
       setTarLoads(data.tarLoads || []);
       setWorkBasedEntries(data.workBasedEntries || []);
       setExpenses(data.expenses || []);
+      setInsuranceRecords(data.insuranceRecords || []);
     } catch (e) {
       console.error("Failed to refresh dashboard data", e);
     } finally {
@@ -187,6 +193,15 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
       if (data) setExpenses(data);
     } catch (e) {
       console.error("Failed to refresh expenses", e);
+    }
+  };
+
+  const refreshInsuranceRecords = async () => {
+    try {
+      const data = await getPublicWorksInsurancesAction();
+      if (data) setInsuranceRecords(data);
+    } catch (e) {
+      console.error("Failed to refresh insurance records", e);
     }
   };
 
@@ -274,10 +289,22 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
     setExpenses((prev: Expense[]) => prev.filter((ex: Expense) => ex.id !== id));
   };
 
+  const optimisticUpdateInsurance = (updated: any) => {
+    setInsuranceRecords((prev: PublicWorksInsurance[]) => {
+      const idx = prev.findIndex((ins) => ins.id === updated.id);
+      if (idx === -1) return [updated, ...prev];
+      return prev.map((ins) => (ins.id === updated.id ? { ...ins, ...updated } : ins));
+    });
+  };
+  const optimisticDeleteInsurance = (id: string) => {
+    setInsuranceRecords((prev: PublicWorksInsurance[]) => prev.filter((ins) => ins.id !== id));
+  };
+
   const navigationItems = [
     { id: "dashboard", label: "Dashboard", icon: Building2 },
     { id: "cement-load", label: "Cement Load Updation", icon: Package },
     { id: "entry", label: "Entry", icon: FileText },
+    { id: "public-works-insurance", label: "Public Works Insurance", icon: ShieldCheck },
     { id: "dlp-notifications", label: "DLP Notifications", icon: AlertCircle },
     { id: "stock-register", label: "Stock Register", icon: Warehouse },
     { id: "materials-used", label: "Total Materials Used In Site", icon: Compass },
@@ -529,6 +556,20 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
               onDeleteEntry={deleteEntryAction}
               onOptimisticUpdate={optimisticUpdateEntry}
               onOptimisticDelete={optimisticDeleteEntry}
+              onNavigate={setActiveTab}
+            />
+          )}
+
+          {activeTab === "public-works-insurance" && (
+            <PublicWorksInsuranceView
+              insuranceRecords={insuranceRecords}
+              entries={entries}
+              onRefresh={refreshInsuranceRecords}
+              onCreateInsurance={createPublicWorksInsuranceAction}
+              onUpdateInsurance={updatePublicWorksInsuranceAction}
+              onDeleteInsurance={deletePublicWorksInsuranceAction}
+              onOptimisticUpdate={optimisticUpdateInsurance}
+              onOptimisticDelete={optimisticDeleteInsurance}
               onNavigate={setActiveTab}
             />
           )}

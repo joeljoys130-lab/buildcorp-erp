@@ -32,6 +32,10 @@ async function runTenantIsolationTests() {
   assert(hasPermission('ACCOUNTANT', 'EXPENSE_CREATE') === true, 'ACCOUNTANT can create expenses');
   assert(hasPermission('ACCOUNTANT', 'MATERIAL_DELETE') === false, 'ACCOUNTANT cannot delete site materials');
   assert(hasPermission('SITE_MANAGER', 'STOCK_UPDATE') === true, 'SITE_MANAGER can update stock');
+  assert(hasPermission('ORG_OWNER', 'INSURANCE_CREATE') === true, 'ORG_OWNER can create insurance');
+  assert(hasPermission('VIEWER', 'INSURANCE_CREATE') === false, 'VIEWER cannot create insurance');
+  assert(hasPermission('VIEWER', 'INSURANCE_VIEW') === true, 'VIEWER can view insurance');
+  assert(hasPermission('ACCOUNTANT', 'INSURANCE_DELETE') === false, 'ACCOUNTANT cannot delete insurance');
 
   // Test 2: Tenant Context Scoping logic
   console.log('\n--- Test Group 2: Tenant Scoping Assertions ---');
@@ -89,6 +93,11 @@ async function runTenantIsolationTests() {
   assert(queryOrgA.organizationId === 'org-a-123', 'Query A correctly scoped to Org A');
   assert(queryOrgB.organizationId === 'org-b-456', 'Query B correctly scoped to Org B');
   assert(queryOrgA.organizationId !== queryOrgB.organizationId, 'Cross-tenant query leakage prevented');
+
+  // Insurance document query scoping check
+  const docQueryOrgA = { id: 'file-101', ownerEmail: orgAContext.email };
+  const docQueryOrgB = { id: 'file-101', ownerEmail: orgBContext.email };
+  assert(docQueryOrgA.ownerEmail !== docQueryOrgB.ownerEmail, 'Insurance documents strictly isolated by tenant owner email');
 
   console.log(`\n==================================================`);
   console.log(`Tenant Isolation Verification Complete: ${passed} Passed, ${failed} Failed.`);

@@ -117,6 +117,7 @@ export interface Entry {
   gstApplicable: boolean;
   createdAt: Date;
   updatedAt: Date;
+  deletedAt?: Date | null;
 }
 
 // MODULE 3 - STOCK REGISTER
@@ -232,4 +233,38 @@ export interface Expense {
   description: string;
   amount: number;
   createdAt: Date;
+}
+
+// MODULE — PUBLIC WORKS INSURANCE
+export interface PublicWorksInsurance {
+  id: string;
+  organizationId?: string | null;
+  ownerEmail?: string;
+  workId: string;
+  workName: string;
+  workReferenceNo?: string | null;
+  insuranceAgentName: string;
+  mobileNumber: string;
+  loaSentDate: Date;
+  insuranceFee: number;
+  insuranceReceivedDate?: Date | null;
+  documentName?: string | null;
+  documentPath?: string | null;
+  documentMimeType?: string | null;
+  documentSize?: number | null;
+  createdAt: Date;
+  updatedAt?: Date;
+  deletedAt?: Date | null;
+}
+
+export interface InsuranceDocumentFile {
+  id: string;
+  organizationId?: string | null;
+  ownerEmail: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  chunks: string[];
+  createdAt: Date;
+  deletedAt?: Date | null;
 }

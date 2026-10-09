@@ -34,6 +34,7 @@ export default async function Page() {
     workBasedEntries,
     privateWorks,
     expenses,
+    insuranceRecords,
   ] = await Promise.all([
     dbService.getEntries(ctx.email),
     dbService.getCementLoads(ctx.email),
@@ -43,6 +44,7 @@ export default async function Page() {
     dbService.getWorkBasedEntries(ctx.email),
     dbService.getPrivateWorks(ctx.email),
     dbService.getExpenses(ctx.email),
+    dbService.getPublicWorksInsurances(ctx.email),
   ]);
 
   const initialData = {
@@ -54,6 +56,7 @@ export default async function Page() {
     workBasedEntries,
     privateWorks,
     expenses,
+    insuranceRecords,
   };
 
   return <DashboardPortal initialUser={user} initialData={initialData} />;

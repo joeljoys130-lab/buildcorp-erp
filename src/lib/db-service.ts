@@ -11,7 +11,9 @@ import prisma from './prisma';
 import {
   CementLoad, Entry, StockRegisterItem, SiteMaterial,
   PrivateWork, TarLoad, WorkBasedEntry, Expense,
+  PublicWorksInsurance,
 } from './types';
+import { deleteInsuranceDocument } from './document-storage';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -716,6 +718,353 @@ class DbService {
         where: { id, ownerEmail },
         data: { deletedAt: new Date() },
       });
+      return true;
+    });
+  }
+
+  // ── MODULE — PUBLIC WORKS INSURANCE ────────────────────────────────────────
+
+  /**
+   * Returns all active public works eligible for insurance:
+   * 1. Must be from Entry (Public Work) — PrivateWorks are strictly excluded.
+   * 2. Status must indicate work has started (status !== 'Not Started').
+   * 3. Work data must be entered (workName is present and non-empty).
+   */
+  async getEligiblePublicWorks(ownerEmail: string): Promise<Entry[]> {
+    return readDb(
+      () => prisma.entry.findMany({
+        where: {
+          ownerEmail,
+          status: { not: 'Not Started' },
+          workName: { not: '' },
+          OR: [
+            { deletedAt: { isSet: false } },
+            { deletedAt: null }
+          ]
+        },
+        orderBy: { createdAt: 'desc' },
+      }) as unknown as Promise<Entry[]>,
+      () => [] as Entry[],
+    );
+  }
+
+  async getPublicWorksInsurances(ownerEmail: string): Promise<PublicWorksInsurance[]> {
+    return readDb(
+      () => prisma.publicWorksInsurance.findMany({
+        where: {
+          ownerEmail,
+          OR: [
+            { deletedAt: { isSet: false } },
+            { deletedAt: null }
+          ]
+        },
+        orderBy: { createdAt: 'desc' },
+      }) as unknown as Promise<PublicWorksInsurance[]>,
+      () => [] as PublicWorksInsurance[],
+    );
+  }
+
+  async getPublicWorksInsuranceById(id: string, ownerEmail: string): Promise<PublicWorksInsurance | null> {
+    return readDb(
+      () => prisma.publicWorksInsurance.findFirst({
+        where: {
+          id,
+          ownerEmail,
+          OR: [
+            { deletedAt: { isSet: false } },
+            { deletedAt: null }
+          ]
+        }
+      }) as unknown as Promise<PublicWorksInsurance | null>,
+      () => null,
+    );
+  }
+
+  async createPublicWorksInsurance(
+    data: Omit<PublicWorksInsurance, 'id' | 'createdAt' | 'updatedAt'>,
+    ownerEmail: string,
+  ): Promise<PublicWorksInsurance> {
+    try {
+      const workId = (data.workId || '').trim();
+      if (!workId) {
+        throw new Error("Work Name selection is required.");
+      }
+
+      // 1. Verify that selected work exists in public works (Entry)
+      const publicWork = await prisma.entry.findFirst({
+        where: {
+          id: workId,
+          ownerEmail,
+          OR: [
+            { deletedAt: { isSet: false } },
+            { deletedAt: null }
+          ]
+        }
+      });
+
+      if (!publicWork) {
+        // Check if it's a private work
+        const privateWork = await prisma.privateWork.findFirst({
+          where: {
+            id: workId,
+            ownerEmail,
+            OR: [
+              { deletedAt: { isSet: false } },
+              { deletedAt: null }
+            ]
+          }
+        });
+
+        if (privateWork) {
+          throw new Error("Insurance records cannot be created for private works. This feature applies only to public works.");
+        }
+
+        throw new Error("Selected public work was not found or access is denied.");
+      }
+
+      // 2. Verify that work status indicates it has started
+      if (publicWork.status === 'Not Started') {
+        throw new Error(`Insurance records can only be created after a work has started. Current status for "${publicWork.workName}" is "Not Started".`);
+      }
+
+      // 3. Verify that work data has been entered
+      if (!publicWork.workName || publicWork.workName.trim() === '') {
+        throw new Error("The selected public work does not have valid work data entered.");
+      }
+
+      // 4. Prevent duplicate insurance records for the same public work
+      const existingPolicy = await prisma.publicWorksInsurance.findFirst({
+        where: {
+          workId,
+          ownerEmail,
+          OR: [
+            { deletedAt: { isSet: false } },
+            { deletedAt: null }
+          ]
+        }
+      });
+
+      if (existingPolicy) {
+        throw new Error(`An insurance record already exists for "${publicWork.workName}". Duplicate policies are not permitted.`);
+      }
+
+      // 5. Validate Insurance Agent Name
+      const agentName = (data.insuranceAgentName || '').trim();
+      if (!agentName) {
+        throw new Error("Insurance agent name is required.");
+      }
+
+      // 6. Validate Mobile Number
+      const mobile = (data.mobileNumber || '').trim();
+      if (!mobile) {
+        throw new Error("Mobile number is required.");
+      }
+      const rawDigits = mobile.replace(/\D/g, '');
+      if (rawDigits.length < 10 || rawDigits.length > 15 || !/^\+?[0-9\s\-()]{10,20}$/.test(mobile)) {
+        throw new Error("Please enter a valid mobile number (10 to 15 digits).");
+      }
+
+      // 7. Validate LOA Sent Date
+      if (!data.loaSentDate) {
+        throw new Error("LOA sent date is required.");
+      }
+      const loaDate = new Date(data.loaSentDate);
+      if (isNaN(loaDate.getTime())) {
+        throw new Error("Invalid LOA sent date format.");
+      }
+
+      // 8. Validate Insurance Fee (positive monetary amount)
+      const fee = Number(data.insuranceFee);
+      if (isNaN(fee) || fee <= 0) {
+        throw new Error("Insurance fee must be a positive monetary amount greater than 0.");
+      }
+
+      // 9. Validate Insurance Received Date (optional, but if present must be >= loaDate)
+      let receivedDate: Date | null = null;
+      if (data.insuranceReceivedDate) {
+        receivedDate = new Date(data.insuranceReceivedDate);
+        if (isNaN(receivedDate.getTime())) {
+          throw new Error("Invalid insurance received date.");
+        }
+        if (receivedDate < loaDate) {
+          throw new Error("Insurance received date cannot be earlier than LOA sent date.");
+        }
+      }
+
+      return await writeDb(() => prisma.publicWorksInsurance.create({
+        data: {
+          workId,
+          workName: publicWork.workName,
+          workReferenceNo: publicWork.agreementNo || null,
+          insuranceAgentName: agentName,
+          mobileNumber: mobile,
+          loaSentDate: loaDate,
+          insuranceFee: fee,
+          insuranceReceivedDate: receivedDate,
+          documentName: data.documentName || null,
+          documentPath: data.documentPath || null,
+          documentMimeType: data.documentMimeType || null,
+          documentSize: data.documentSize || null,
+          ownerEmail,
+          organizationId: (data as any).organizationId || null,
+        } as any,
+      })) as unknown as Promise<PublicWorksInsurance>;
+    } catch (err) {
+      // Prevent orphaned stored files on creation failure
+      if (data.documentPath) {
+        await deleteInsuranceDocument(data.documentPath, ownerEmail).catch(() => {});
+      }
+      throw err;
+    }
+  }
+
+  async updatePublicWorksInsurance(
+    id: string,
+    updates: Partial<PublicWorksInsurance>,
+    ownerEmail: string,
+  ): Promise<PublicWorksInsurance | null> {
+    return writeDb(async () => {
+      const existing = await prisma.publicWorksInsurance.findFirst({
+        where: {
+          id,
+          ownerEmail,
+          OR: [
+            { deletedAt: { isSet: false } },
+            { deletedAt: null }
+          ]
+        }
+      });
+
+      if (!existing) return null;
+
+      const payload: Record<string, any> = {};
+
+      // If workId changed, validate new work
+      if (updates.workId && updates.workId !== existing.workId) {
+        const publicWork = await prisma.entry.findFirst({
+          where: {
+            id: updates.workId,
+            ownerEmail,
+            OR: [
+              { deletedAt: { isSet: false } },
+              { deletedAt: null }
+            ]
+          }
+        });
+
+        if (!publicWork) {
+          const privateWork = await prisma.privateWork.findFirst({
+            where: { id: updates.workId, ownerEmail }
+          });
+          if (privateWork) {
+            throw new Error("Insurance records cannot be created for private works.");
+          }
+          throw new Error("Selected public work was not found.");
+        }
+
+        if (publicWork.status === 'Not Started') {
+          throw new Error(`Insurance records can only be created after work has started. Current status for "${publicWork.workName}" is "Not Started".`);
+        }
+
+        // Check if another policy already exists for that work
+        const duplicate = await prisma.publicWorksInsurance.findFirst({
+          where: {
+            workId: updates.workId,
+            ownerEmail,
+            NOT: { id },
+            OR: [
+              { deletedAt: { isSet: false } },
+              { deletedAt: null }
+            ]
+          }
+        });
+
+        if (duplicate) {
+          throw new Error(`An insurance record already exists for "${publicWork.workName}".`);
+        }
+
+        payload.workId = updates.workId;
+        payload.workName = publicWork.workName;
+        payload.workReferenceNo = publicWork.agreementNo || null;
+      }
+
+      if (updates.insuranceAgentName !== undefined) {
+        const agentName = updates.insuranceAgentName.trim();
+        if (!agentName) throw new Error("Insurance agent name cannot be empty.");
+        payload.insuranceAgentName = agentName;
+      }
+
+      if (updates.mobileNumber !== undefined) {
+        const mobile = updates.mobileNumber.trim();
+        const rawDigits = mobile.replace(/\D/g, '');
+        if (rawDigits.length < 10 || rawDigits.length > 15 || !/^\+?[0-9\s\-()]{10,20}$/.test(mobile)) {
+          throw new Error("Please enter a valid mobile number (10 to 15 digits).");
+        }
+        payload.mobileNumber = mobile;
+      }
+
+      let loaDate = existing.loaSentDate;
+      if (updates.loaSentDate) {
+        const d = new Date(updates.loaSentDate);
+        if (isNaN(d.getTime())) throw new Error("Invalid LOA sent date.");
+        loaDate = d;
+        payload.loaSentDate = d;
+      }
+
+      if (updates.insuranceFee !== undefined) {
+        const fee = Number(updates.insuranceFee);
+        if (isNaN(fee) || fee <= 0) {
+          throw new Error("Insurance fee must be a positive monetary amount greater than 0.");
+        }
+        payload.insuranceFee = fee;
+      }
+
+      if (updates.insuranceReceivedDate !== undefined) {
+        if (!updates.insuranceReceivedDate) {
+          payload.insuranceReceivedDate = null;
+        } else {
+          const recDate = new Date(updates.insuranceReceivedDate);
+          if (isNaN(recDate.getTime())) throw new Error("Invalid insurance received date.");
+          if (recDate < loaDate) {
+            throw new Error("Insurance received date cannot be earlier than LOA sent date.");
+          }
+          payload.insuranceReceivedDate = recDate;
+        }
+      }
+
+      // If document was replaced or removed, purge the old stored document to prevent orphaning
+      if (updates.documentPath !== undefined && updates.documentPath !== existing.documentPath) {
+        if (existing.documentPath) {
+          await deleteInsuranceDocument(existing.documentPath, ownerEmail).catch(() => {});
+        }
+      }
+
+      if (updates.documentName !== undefined) payload.documentName = updates.documentName;
+      if (updates.documentPath !== undefined) payload.documentPath = updates.documentPath;
+      if (updates.documentMimeType !== undefined) payload.documentMimeType = updates.documentMimeType;
+      if (updates.documentSize !== undefined) payload.documentSize = updates.documentSize;
+
+      return prisma.publicWorksInsurance.update({
+        where: { id },
+        data: payload as any,
+      });
+    }) as unknown as Promise<PublicWorksInsurance | null>;
+  }
+
+  async deletePublicWorksInsurance(id: string, ownerEmail: string): Promise<boolean> {
+    return writeDb(async () => {
+      const existing = await prisma.publicWorksInsurance.findFirst({
+        where: { id, ownerEmail },
+      });
+      if (existing) {
+        if (existing.documentPath) {
+          await deleteInsuranceDocument(existing.documentPath, ownerEmail).catch(() => {});
+        }
+        await prisma.publicWorksInsurance.updateMany({
+          where: { id, ownerEmail },
+          data: { deletedAt: new Date() },
+        });
+      }
       return true;
     });
   }

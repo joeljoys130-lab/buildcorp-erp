@@ -357,3 +357,47 @@ model DlpNotificationLog {
   @@index([userId])
   @@index([ownerEmail])
 }
+
+// ── MODULE — PUBLIC WORKS INSURANCE ──────────────────────────────────────────
+
+model PublicWorksInsurance {
+  id                    String    @id @default(cuid()) @map("_id")
+  organizationId        String?
+  ownerEmail            String
+  workId                String
+  workName              String
+  workReferenceNo       String?
+  insuranceAgentName    String
+  mobileNumber          String
+  loaSentDate           DateTime
+  insuranceFee          Float
+  insuranceReceivedDate DateTime?
+  documentName          String?
+  documentPath          String?
+  documentMimeType      String?
+  documentSize          Int?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  deletedAt             DateTime?
+
+  @@index([ownerEmail])
+  @@index([organizationId])
+  @@index([workId])
+}
+
+// ── SECURE PERSISTENT DOCUMENT STORAGE (NETLIFY COMPATIBLE) ──────────────────
+
+model InsuranceDocumentFile {
+  id             String    @id @default(cuid()) @map("_id")
+  organizationId String?
+  ownerEmail     String
+  fileName       String
+  mimeType       String
+  fileSize       Int
+  chunks         String[]
+  createdAt      DateTime  @default(now())
+  deletedAt      DateTime?
+
+  @@index([ownerEmail])
+  @@index([organizationId])
+}
