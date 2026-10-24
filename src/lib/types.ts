@@ -288,8 +288,8 @@ export interface PublicWorksDocument {
   fileSize: number;
   mimeType: string;
   documentPath: string;
-  uploaderEmail?: string | null;
   uploaderName?: string | null;
+  uploaderEmail?: string | null;
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date | null;
