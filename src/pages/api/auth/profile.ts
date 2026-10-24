@@ -1,21 +1,16 @@
 // src/pages/api/auth/profile.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 import prisma from '@/lib/prisma';
-import { verifyAccessToken } from '@/lib/auth/jwt';
+import { resolveAuthenticatedTenantFromApiRequest } from '@/lib/auth/tenant';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // 1. Authenticate user via JWT in HttpOnly cookie
-  const token = req.cookies.auth_token;
-  if (!token) {
+  // 1. Authenticate user via Clerk or legacy JWT
+  const tenantCtx = await resolveAuthenticatedTenantFromApiRequest(req);
+  if (!tenantCtx) {
     return res.status(401).json({ success: false, error: 'Authentication required' });
   }
 
-  const decoded = verifyAccessToken(token) as { id: string; email: string; name: string } | null;
-  if (!decoded) {
-    return res.status(401).json({ success: false, error: 'Invalid or expired session' });
-  }
-
-  const user = await prisma.user.findUnique({ where: { id: decoded.id } });
+  const user = await prisma.user.findUnique({ where: { id: tenantCtx.userId } });
   if (!user) {
     return res.status(404).json({ success: false, error: 'User not found' });
   }

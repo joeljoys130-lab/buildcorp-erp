@@ -11,7 +11,7 @@ import prisma from './prisma';
 import {
   CementLoad, Entry, StockRegisterItem, SiteMaterial,
   PrivateWork, TarLoad, WorkBasedEntry, Expense,
-  PublicWorksInsurance,
+  PublicWorksInsurance, PublicWorksDocument,
 } from './types';
 import { deleteInsuranceDocument } from './document-storage';
 
@@ -1068,6 +1068,341 @@ class DbService {
       return true;
     });
   }
+
+  // ── MODULE — PUBLIC WORKS DOCUMENTS ──────────────────────────────────────────
+
+  /** Normalize document category strings */
+  normalizeDocumentCategory(cat: string): string {
+    const upper = (cat || '').toUpperCase().trim();
+    if (upper === 'TAR BILL' || upper === 'TAR_BILL' || upper === 'TARBILL') return 'TAR_BILL';
+    if (upper === 'SECURITY') return 'SECURITY';
+    if (upper === 'ESTIMATE') return 'ESTIMATE';
+    if (upper === 'SITE PLAN' || upper === 'SITE_PLAN' || upper === 'SITEPLAN') return 'SITE_PLAN';
+    if (upper === 'INSURANCE') return 'INSURANCE';
+    return upper;
+  }
+
+  async getPublicWorksDocuments(
+    ownerEmail: string,
+    filters?: { workId?: string; category?: string }
+  ): Promise<PublicWorksDocument[]> {
+    return readDb(
+      async () => {
+        const whereClause: Record<string, any> = {
+          ownerEmail,
+          OR: [
+            { deletedAt: { isSet: false } },
+            { deletedAt: null }
+          ]
+        };
+
+        if (filters?.workId && filters.workId !== 'ALL') {
+          whereClause.workId = filters.workId;
+        }
+
+        const normalizedCategory = filters?.category && filters.category !== 'ALL'
+          ? this.normalizeDocumentCategory(filters.category)
+          : null;
+
+        if (normalizedCategory) {
+          whereClause.category = normalizedCategory;
+        }
+
+        const shouldIncludeInsurance = !normalizedCategory || normalizedCategory === 'INSURANCE';
+
+        const insuranceWhere: Record<string, any> = {
+          ownerEmail,
+          documentPath: { not: null },
+          OR: [
+            { deletedAt: { isSet: false } },
+            { deletedAt: null }
+          ]
+        };
+        if (filters?.workId && filters.workId !== 'ALL') {
+          insuranceWhere.workId = filters.workId;
+        }
+
+        const [documents, insurances] = await Promise.all([
+          prisma.publicWorksDocument.findMany({
+            where: whereClause,
+            orderBy: { createdAt: 'desc' },
+          }),
+          shouldIncludeInsurance
+            ? prisma.publicWorksInsurance.findMany({
+                where: insuranceWhere,
+                select: {
+                  id: true,
+                  organizationId: true,
+                  ownerEmail: true,
+                  workId: true,
+                  workName: true,
+                  insuranceAgentName: true,
+                  documentName: true,
+                  documentSize: true,
+                  documentMimeType: true,
+                  documentPath: true,
+                  createdAt: true,
+                  updatedAt: true,
+                  deletedAt: true,
+                },
+                orderBy: { createdAt: 'desc' }
+              })
+            : Promise.resolve([]),
+        ]);
+
+        if (insurances.length > 0) {
+          const existingPaths = new Set(documents.map(d => d.documentPath));
+
+          for (const ins of insurances) {
+            if (ins.documentPath && !existingPaths.has(ins.documentPath)) {
+              documents.push({
+                id: `ins-doc-${ins.id}`,
+                organizationId: ins.organizationId || null,
+                ownerEmail: ins.ownerEmail,
+                workId: ins.workId,
+                workName: ins.workName,
+                category: 'INSURANCE',
+                fileName: ins.documentName || 'Insurance-Policy.pdf',
+                fileSize: ins.documentSize || 0,
+                mimeType: ins.documentMimeType || 'application/pdf',
+                documentPath: ins.documentPath,
+                uploaderEmail: ins.ownerEmail,
+                uploaderName: ins.insuranceAgentName ? `Agent: ${ins.insuranceAgentName}` : 'System',
+                createdAt: ins.createdAt,
+                updatedAt: ins.updatedAt,
+                deletedAt: ins.deletedAt,
+              });
+            }
+          }
+        }
+
+        // Sort combined list newest first
+        documents.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+        return documents as unknown as PublicWorksDocument[];
+      },
+      () => [] as PublicWorksDocument[]
+    );
+  }
+
+  async getPublicWorksDocumentById(id: string, ownerEmail: string): Promise<PublicWorksDocument | null> {
+    return readDb(
+      async () => {
+        // 1. Direct PublicWorksDocument lookup
+        const doc = await prisma.publicWorksDocument.findFirst({
+          where: {
+            id,
+            ownerEmail,
+            OR: [
+              { deletedAt: { isSet: false } },
+              { deletedAt: null }
+            ]
+          }
+        });
+        if (doc) return doc as unknown as PublicWorksDocument;
+
+        // 2. Synthesized Insurance document lookup
+        if (id.startsWith('ins-doc-')) {
+          const insId = id.replace('ins-doc-', '');
+          const ins = await prisma.publicWorksInsurance.findFirst({
+            where: {
+              id: insId,
+              ownerEmail,
+              OR: [
+                { deletedAt: { isSet: false } },
+                { deletedAt: null }
+              ]
+            }
+          });
+          if (ins && ins.documentPath) {
+            return {
+              id: `ins-doc-${ins.id}`,
+              organizationId: ins.organizationId || null,
+              ownerEmail: ins.ownerEmail,
+              workId: ins.workId,
+              workName: ins.workName,
+              category: 'INSURANCE',
+              fileName: ins.documentName || 'Insurance-Policy.pdf',
+              fileSize: ins.documentSize || 0,
+              mimeType: ins.documentMimeType || 'application/pdf',
+              documentPath: ins.documentPath,
+              uploaderEmail: ins.ownerEmail,
+              uploaderName: ins.insuranceAgentName ? `Agent: ${ins.insuranceAgentName}` : 'System',
+              createdAt: ins.createdAt,
+              updatedAt: ins.updatedAt,
+              deletedAt: ins.deletedAt,
+            } as unknown as PublicWorksDocument;
+          }
+        }
+
+        // 3. Fallback: check if id is a PublicWorksInsurance id with a document
+        const insRecord = await prisma.publicWorksInsurance.findFirst({
+          where: {
+            id,
+            ownerEmail,
+            OR: [
+              { deletedAt: { isSet: false } },
+              { deletedAt: null }
+            ]
+          }
+        });
+        if (insRecord && insRecord.documentPath) {
+          return {
+            id: `ins-doc-${insRecord.id}`,
+            organizationId: insRecord.organizationId || null,
+            ownerEmail: insRecord.ownerEmail,
+            workId: insRecord.workId,
+            workName: insRecord.workName,
+            category: 'INSURANCE',
+            fileName: insRecord.documentName || 'Insurance-Policy.pdf',
+            fileSize: insRecord.documentSize || 0,
+            mimeType: insRecord.documentMimeType || 'application/pdf',
+            documentPath: insRecord.documentPath,
+            uploaderEmail: insRecord.ownerEmail,
+            uploaderName: insRecord.insuranceAgentName ? `Agent: ${insRecord.insuranceAgentName}` : 'System',
+            createdAt: insRecord.createdAt,
+            updatedAt: insRecord.updatedAt,
+            deletedAt: insRecord.deletedAt,
+          } as unknown as PublicWorksDocument;
+        }
+
+        return null;
+      },
+      () => null
+    );
+  }
+
+  async createPublicWorksDocument(
+    data: {
+      workId: string;
+      category: string;
+      fileName: string;
+      fileSize: number;
+      mimeType: string;
+      documentPath: string;
+      uploaderName?: string;
+      organizationId?: string | null;
+    },
+    ownerEmail: string
+  ): Promise<PublicWorksDocument> {
+    try {
+      const workId = (data.workId || '').trim();
+      if (!workId) {
+        throw new Error("Work selection is required.");
+      }
+
+      // Verify that selected work exists in public works (Entry) via primary key _id index
+      const publicWork = await prisma.entry.findUnique({
+        where: { id: workId },
+        select: {
+          id: true,
+          ownerEmail: true,
+          workName: true,
+          status: true,
+          deletedAt: true,
+        },
+      });
+
+      if (!publicWork || publicWork.ownerEmail !== ownerEmail || publicWork.deletedAt) {
+        const privateWork = await prisma.privateWork.findUnique({
+          where: { id: workId },
+          select: { id: true, ownerEmail: true, deletedAt: true },
+        });
+        if (privateWork && privateWork.ownerEmail === ownerEmail && !privateWork.deletedAt) {
+          throw new Error("Documents cannot be uploaded for private works. This feature applies only to public works.");
+        }
+        throw new Error("Selected public work was not found or access is denied.");
+      }
+
+      // Verify that work status indicates it has started
+      if (publicWork.status === 'Not Started') {
+        throw new Error(`Documents can only be added after a work has started. Current status for "${publicWork.workName}" is "Not Started".`);
+      }
+
+      // Validate category
+      const rawCategory = (data.category || '').trim();
+      const validCategories = new Set(['TAR_BILL', 'SECURITY', 'ESTIMATE', 'SITE_PLAN', 'INSURANCE']);
+      const normalizedCategory = this.normalizeDocumentCategory(rawCategory);
+      if (!validCategories.has(normalizedCategory)) {
+        throw new Error(`Invalid document category "${rawCategory}". Allowed categories are: Tar Bill, Security, Estimate, Site Plan, Insurance.`);
+      }
+
+      // Validate file fields
+      const fileName = (data.fileName || '').trim();
+      if (!fileName) {
+        throw new Error("Original filename is required.");
+      }
+      if (!data.documentPath || !data.documentPath.trim()) {
+        throw new Error("Document storage reference is required.");
+      }
+
+      return await writeDb(() => prisma.publicWorksDocument.create({
+        data: {
+          workId,
+          workName: publicWork.workName,
+          category: normalizedCategory,
+          fileName,
+          fileSize: Number(data.fileSize) || 0,
+          mimeType: data.mimeType || 'application/octet-stream',
+          documentPath: data.documentPath.trim(),
+          ownerEmail,
+          organizationId: data.organizationId || null,
+          uploaderEmail: ownerEmail,
+          uploaderName: data.uploaderName || ownerEmail.split('@')[0],
+        }
+      })) as unknown as Promise<PublicWorksDocument>;
+    } catch (err) {
+      if (data.documentPath) {
+        await deleteInsuranceDocument(data.documentPath, ownerEmail).catch(() => {});
+      }
+      throw err;
+    }
+  }
+
+  async deletePublicWorksDocument(id: string, ownerEmail: string): Promise<boolean> {
+    return writeDb(async () => {
+      // 1. Check direct PublicWorksDocument
+      // 1. Check direct PublicWorksDocument via primary key _id index
+      const existing = await prisma.publicWorksDocument.findUnique({
+        where: { id },
+        select: { id: true, ownerEmail: true, documentPath: true },
+      });
+      if (existing && existing.ownerEmail === ownerEmail) {
+        if (existing.documentPath) {
+          await deleteInsuranceDocument(existing.documentPath, ownerEmail).catch(() => {});
+        }
+        await prisma.publicWorksDocument.updateMany({
+          where: { id, ownerEmail },
+          data: { deletedAt: new Date() },
+        });
+        return true;
+      }
+
+      // 2. Check if it's an attached insurance document
+      if (id.startsWith('ins-doc-')) {
+        const insId = id.replace('ins-doc-', '');
+        const ins = await prisma.publicWorksInsurance.findFirst({
+          where: { id: insId, ownerEmail }
+        });
+        if (ins && ins.documentPath) {
+          await deleteInsuranceDocument(ins.documentPath, ownerEmail).catch(() => {});
+          await prisma.publicWorksInsurance.updateMany({
+            where: { id: insId, ownerEmail },
+            data: {
+              documentPath: null,
+              documentName: null,
+              documentMimeType: null,
+              documentSize: null
+            }
+          });
+          return true;
+        }
+      }
+
+      return false;
+    });
+  }
 }
 
 export const dbService = new DbService();
+

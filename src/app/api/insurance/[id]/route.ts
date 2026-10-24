@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import { dbService } from '@/lib/db-service';
-import { getTenantContextFromToken, assertPermission } from '@/lib/auth/tenant';
+import { resolveAuthenticatedTenant, assertPermission } from '@/lib/auth/tenant';
 
 export async function GET(
   _request: Request,
@@ -9,15 +8,9 @@ export async function GET(
 ) {
   try {
     const { id } = await context.params;
-    const cookieStore = await cookies();
-    const token = cookieStore.get('auth_token')?.value;
-    if (!token) {
-      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
-    }
-
-    const tenantCtx = await getTenantContextFromToken(token);
+    const tenantCtx = await resolveAuthenticatedTenant();
     if (!tenantCtx) {
-      return NextResponse.json({ error: 'Invalid or expired session' }, { status: 401 });
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     }
 
     assertPermission(tenantCtx, 'INSURANCE_VIEW');
@@ -41,15 +34,9 @@ export async function PUT(
 ) {
   try {
     const { id } = await context.params;
-    const cookieStore = await cookies();
-    const token = cookieStore.get('auth_token')?.value;
-    if (!token) {
-      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
-    }
-
-    const tenantCtx = await getTenantContextFromToken(token);
+    const tenantCtx = await resolveAuthenticatedTenant();
     if (!tenantCtx) {
-      return NextResponse.json({ error: 'Invalid or expired session' }, { status: 401 });
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     }
 
     assertPermission(tenantCtx, 'INSURANCE_UPDATE');
@@ -78,15 +65,9 @@ export async function DELETE(
 ) {
   try {
     const { id } = await context.params;
-    const cookieStore = await cookies();
-    const token = cookieStore.get('auth_token')?.value;
-    if (!token) {
-      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
-    }
-
-    const tenantCtx = await getTenantContextFromToken(token);
+    const tenantCtx = await resolveAuthenticatedTenant();
     if (!tenantCtx) {
-      return NextResponse.json({ error: 'Invalid or expired session' }, { status: 401 });
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     }
 
     assertPermission(tenantCtx, 'INSURANCE_DELETE');

@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Mail, Lock, ArrowRight, ShieldCheck, RefreshCw, KeyRound, CheckCircle2 } from "lucide-react";
 import { useRouter } from "next/router";
+import { SignIn } from "@clerk/nextjs";
 
 interface LoginViewProps {
   onLoginSuccess: (user: any) => void;
@@ -9,12 +10,15 @@ interface LoginViewProps {
 
 type AuthStep = "login" | "otp" | "forgot-email" | "forgot-otp" | "forgot-reset";
 
+const hasClerkKey = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+
 export default function LoginView({ onLoginSuccess }: LoginViewProps) {
   const router = useRouter();
   const otpInputRef = useRef<HTMLInputElement>(null);
   const forgotOtpRef = useRef<HTMLInputElement>(null);
 
   /* ── state ─────────────────────────────────────────────────────── */
+  const [authMethod, setAuthMethod] = useState<"clerk" | "legacy">(hasClerkKey ? "clerk" : "legacy");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
@@ -300,23 +304,26 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
           {/* Card Step Header */}
           <div>
             <span className="text-[11px] font-mono tracking-widest text-neutral-400 uppercase font-semibold">
-              {step === "login" && "AUTHENTICATION"}
-              {step === "otp" && "EMAIL VERIFICATION"}
-              {(step === "forgot-email" || step === "forgot-otp" || step === "forgot-reset") && "FORGOT PASSWORD"}
+              {authMethod === "clerk" ? "CLERK AUTHENTICATION" : (
+                step === "login" ? "LEGACY AUTHENTICATION" :
+                step === "otp" ? "EMAIL VERIFICATION" : "FORGOT PASSWORD"
+              )}
             </span>
             <h2 className="text-2xl font-bold tracking-tight text-neutral-900 mt-1">
-              {step === "login" && "Sign in to your account"}
-              {step === "otp" && "Enter Verification Code"}
-              {step === "forgot-email" && "Reset your password"}
-              {step === "forgot-otp" && "Verify your code"}
-              {step === "forgot-reset" && "Create new password"}
+              {authMethod === "clerk" ? "Sign in to BuildCorp ERP" : (
+                step === "login" ? "Sign in to your account" :
+                step === "otp" ? "Enter Verification Code" :
+                step === "forgot-email" ? "Reset your password" :
+                step === "forgot-otp" ? "Verify your code" : "Create new password"
+              )}
             </h2>
             <p className="text-sm text-neutral-500 mt-1">
-              {step === "login" && "Enter your credentials to receive an Email OTP."}
-              {step === "otp" && `We sent a 6-digit code to ${email ? maskEmail(email) : "your email"}.`}
-              {step === "forgot-email" && "Enter your registered email address to receive a verification code."}
-              {step === "forgot-otp" && "Enter the 6-digit code sent to your email."}
-              {step === "forgot-reset" && "Set a new password for your account."}
+              {authMethod === "clerk" ? "Sign in with your verified Clerk email or Google account." : (
+                step === "login" ? "Enter your credentials to receive an Email OTP." :
+                step === "otp" ? `We sent a 6-digit code to ${email ? maskEmail(email) : "your email"}.` :
+                step === "forgot-email" ? "Enter your registered email address to receive a verification code." :
+                step === "forgot-otp" ? "Enter the 6-digit code sent to your email." : "Set a new password for your account."
+              )}
             </p>
           </div>
 
@@ -336,8 +343,71 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
             </div>
           )}
 
-          {/* ── 1. LOGIN FORM ────────────────────────────────────────────── */}
-          {step === "login" && (
+          {/* Authentication Method Selector Tabs (Only when Clerk is configured) */}
+          {hasClerkKey && (
+            <div className="flex rounded-xl bg-neutral-100 p-1 border border-neutral-200">
+              <button
+                type="button"
+                id="tab-clerk-auth"
+                onClick={() => { setAuthMethod("clerk"); setError(""); }}
+                className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  authMethod === "clerk"
+                    ? "bg-white text-neutral-900 shadow-sm"
+                    : "text-neutral-500 hover:text-neutral-900"
+                }`}
+              >
+                Clerk (Google / Email)
+              </button>
+              <button
+                type="button"
+                id="tab-legacy-auth"
+                onClick={() => { setAuthMethod("legacy"); setError(""); }}
+                className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  authMethod === "legacy"
+                    ? "bg-white text-neutral-900 shadow-sm"
+                    : "text-neutral-500 hover:text-neutral-900"
+                }`}
+              >
+                Legacy Email OTP
+              </button>
+            </div>
+          )}
+
+          {/* ── CLERK AUTHENTICATION VIEW ───────────────────────────────── */}
+          {hasClerkKey && authMethod === "clerk" && (
+            <div className="space-y-4">
+              <SignIn
+                routing="hash"
+                fallbackRedirectUrl="/"
+                signUpUrl="/login"
+                appearance={{
+                  elements: {
+                    rootBox: "w-full",
+                    cardBox: "w-full shadow-none border-0",
+                    card: "shadow-none p-0 border-0 bg-transparent w-full",
+                    headerTitle: "hidden",
+                    headerSubtitle: "hidden",
+                    socialButtonsBlockButton: "rounded-xl border border-neutral-300 hover:bg-neutral-50 transition-colors font-medium text-neutral-800 py-2.5",
+                    formButtonPrimary: "bg-black hover:bg-neutral-800 text-white rounded-xl py-3 font-semibold text-sm transition-all",
+                    formFieldInput: "bg-neutral-50 border border-neutral-300 rounded-xl px-4 py-2.5 text-sm text-neutral-900 focus:bg-white focus:border-black focus:ring-1 focus:ring-black",
+                    footerAction: "hidden",
+                  }
+                }}
+              />
+              <div className="pt-4 border-t border-neutral-100 text-center">
+                <button
+                  type="button"
+                  onClick={() => { setAuthMethod("legacy"); setError(""); }}
+                  className="text-xs text-neutral-500 hover:text-black font-medium transition-colors cursor-pointer"
+                >
+                  Or sign in using legacy Email OTP →
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── 1. LEGACY LOGIN FORM ─────────────────────────────────────── */}
+          {(!hasClerkKey || authMethod === "legacy") && step === "login" && (
             <form onSubmit={handleLoginSubmit} className="space-y-4">
               <div>
                 <label className="block text-[11px] font-medium text-neutral-700 uppercase tracking-wider mb-1.5">
@@ -401,6 +471,18 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
                   </>
                 )}
               </button>
+
+              {hasClerkKey && (
+                <div className="pt-4 border-t border-neutral-100 text-center">
+                  <button
+                    type="button"
+                    onClick={() => { setAuthMethod("clerk"); setError(""); }}
+                    className="text-xs text-neutral-500 hover:text-black font-medium transition-colors cursor-pointer"
+                  >
+                    ← Switch to Clerk Email & Google Sign-In
+                  </button>
+                </div>
+              )}
             </form>
           )}
 

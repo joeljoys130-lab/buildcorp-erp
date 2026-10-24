@@ -1,20 +1,15 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import prisma from '@/lib/prisma';
-import { verifyAccessToken } from '@/lib/auth/jwt';
+import { resolveAuthenticatedTenantFromApiRequest } from '@/lib/auth/tenant';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ success: false, error: 'Method not allowed' });
   }
 
-  const token = req.cookies.auth_token;
-  if (!token) {
+  const tenantCtx = await resolveAuthenticatedTenantFromApiRequest(req);
+  if (!tenantCtx) {
     return res.status(401).json({ success: false, error: 'Authentication required' });
-  }
-
-  const decoded = verifyAccessToken(token) as { id: string; email: string } | null;
-  if (!decoded) {
-    return res.status(401).json({ success: false, error: 'Invalid session' });
   }
 
   const { endpoint } = req.body as { endpoint?: string };
@@ -26,7 +21,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     await prisma.pushSubscription.deleteMany({
       where: {
         endpoint,
-        userId: decoded.id,
+        userId: tenantCtx.userId,
       },
     });
 

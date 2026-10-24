@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Building2, Layers, Package, Fuel, Award, FileText, CheckSquare,
   PlusCircle, BookOpen, Warehouse, Compass, Menu, X, LogOut,
   Receipt, TrendingUp, AlertCircle, Bell, BellRing, ShieldCheck
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useClerk } from "@clerk/nextjs";
 import { evaluateDlpStatus } from "@/lib/dlp-utils";
 import {
   getNotificationPermissionState, subscribeUserToPush, unsubscribeUserFromPush, isPushSupported
@@ -24,7 +25,8 @@ import {
   getWorkBasedEntriesAction,
   createExpenseAction, updateExpenseAction, deleteExpenseAction, getExpensesAction,
   getDashboardDataAction,
-  createPublicWorksInsuranceAction, updatePublicWorksInsuranceAction, deletePublicWorksInsuranceAction, getPublicWorksInsurancesAction
+  createPublicWorksInsuranceAction, updatePublicWorksInsuranceAction, deletePublicWorksInsuranceAction, getPublicWorksInsurancesAction,
+  createPublicWorksDocumentAction, deletePublicWorksDocumentAction, getPublicWorksDocumentsAction
 } from "@/app/actions";
 import DashboardView from "./views/dashboard-view";
 import {
@@ -36,12 +38,22 @@ import {
 import { PublicWorksInsuranceView } from "./views/public-works-insurance-view";
 import type {
   CementLoad, Entry, StockRegisterItem, SiteMaterial,
-  PrivateWork, TarLoad, WorkBasedEntry, Expense, PublicWorksInsurance
+  PrivateWork, TarLoad, WorkBasedEntry, Expense, PublicWorksInsurance, PublicWorksDocument
 } from "@/lib/types";
 
 interface DashboardPortalProps {
   initialUser: any;
   initialData: any;
+}
+
+const hasClerkKey = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+
+function ClerkSignOutBridge({ onSignOutReady }: { onSignOutReady: (fn: (options?: any) => Promise<void>) => void }) {
+  const { signOut } = useClerk();
+  useEffect(() => {
+    onSignOutReady(signOut);
+  }, [signOut, onSignOutReady]);
+  return null;
 }
 
 export default function DashboardPortal({ initialUser, initialData }: DashboardPortalProps) {
@@ -50,9 +62,23 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const clerkSignOutRef = useRef<((options?: any) => Promise<void>) | null>(null);
 
   const handleLogout = async () => {
-    await fetch('/api/logout', { method: 'POST', credentials: 'include' });
+    try {
+      await fetch('/api/logout', { method: 'POST', credentials: 'include' });
+    } catch (e) {
+      console.error('Failed to clear legacy session', e);
+    }
+    if (clerkSignOutRef.current) {
+      try {
+        await clerkSignOutRef.current({ redirectUrl: '/login' });
+        return;
+      } catch {
+        router.push('/login');
+        return;
+      }
+    }
     router.push('/login');
   };
 
@@ -66,6 +92,7 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
   const [workBasedEntries, setWorkBasedEntries] = useState(initialData.workBasedEntries || []);
   const [expenses, setExpenses] = useState(initialData.expenses || []);
   const [insuranceRecords, setInsuranceRecords] = useState<PublicWorksInsurance[]>(initialData.insuranceRecords || []);
+  const [documents, setDocuments] = useState<PublicWorksDocument[]>(initialData.publicWorksDocuments || initialData.documents || []);
 
   // Push Notification & In-App Alerts State
   const [pushState, setPushState] = useState<'default' | 'granted' | 'denied' | 'unsupported'>('default');
@@ -117,6 +144,7 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
       setWorkBasedEntries(data.workBasedEntries || []);
       setExpenses(data.expenses || []);
       setInsuranceRecords(data.insuranceRecords || []);
+      setDocuments(data.documents || []);
     } catch (e) {
       console.error("Failed to refresh dashboard data", e);
     } finally {
@@ -205,6 +233,16 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
       console.error("Failed to refresh insurance records", e);
     }
   };
+
+  const refreshDocuments = async () => {
+    try {
+      const data = await getPublicWorksDocumentsAction();
+      if (data) setDocuments(data);
+    } catch (e) {
+      console.error("Failed to refresh documents", e);
+    }
+  };
+
 
   // Optimistic Handlers
   const optimisticUpdateCementLoad = (updated: any) => {
@@ -301,11 +339,22 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
     setInsuranceRecords((prev: PublicWorksInsurance[]) => prev.filter((ins) => ins.id !== id));
   };
 
+  const optimisticUpdateDocument = (updated: any) => {
+    setDocuments((prev: PublicWorksDocument[]) => {
+      const idx = prev.findIndex((d) => d.id === updated.id);
+      if (idx === -1) return [updated, ...prev];
+      return prev.map((d) => (d.id === updated.id ? { ...d, ...updated } : d));
+    });
+  };
+  const optimisticDeleteDocument = (id: string) => {
+    setDocuments((prev: PublicWorksDocument[]) => prev.filter((d) => d.id !== id));
+  };
+
   const navigationItems = [
     { id: "dashboard", label: "Dashboard", icon: Building2 },
     { id: "cement-load", label: "Cement Load Updation", icon: Package },
     { id: "entry", label: "Entry", icon: FileText },
-    { id: "public-works-insurance", label: "Public Works Insurance", icon: ShieldCheck },
+    { id: "public-works-insurance", label: "Public Works Documents", icon: ShieldCheck },
     { id: "dlp-notifications", label: "DLP Notifications", icon: AlertCircle },
     { id: "stock-register", label: "Stock Register", icon: Warehouse },
     { id: "materials-used", label: "Total Materials Used In Site", icon: Compass },
@@ -321,6 +370,13 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
 
   return (
     <div className="min-h-screen flex bg-white text-black font-sans selection:bg-neutral-200">
+      {hasClerkKey && (
+        <ClerkSignOutBridge
+          onSignOutReady={(fn) => {
+            clerkSignOutRef.current = fn;
+          }}
+        />
+      )}
 
       {/* 1. SIDEBAR (DESKTOP) — hidden during print */}
       <aside className="hidden lg:flex print:hidden flex-col w-64 border-r border-neutral-200 bg-black text-white shrink-0">
@@ -564,13 +620,19 @@ export default function DashboardPortal({ initialUser, initialData }: DashboardP
           {activeTab === "public-works-insurance" && (
             <PublicWorksInsuranceView
               insuranceRecords={insuranceRecords}
+              documents={documents}
               entries={entries}
               onRefresh={refreshInsuranceRecords}
+              onRefreshDocuments={refreshDocuments}
               onCreateInsurance={createPublicWorksInsuranceAction}
               onUpdateInsurance={updatePublicWorksInsuranceAction}
               onDeleteInsurance={deletePublicWorksInsuranceAction}
+              onCreateDocument={createPublicWorksDocumentAction}
+              onDeleteDocument={deletePublicWorksDocumentAction}
               onOptimisticUpdate={optimisticUpdateInsurance}
               onOptimisticDelete={optimisticDeleteInsurance}
+              onOptimisticUpdateDocument={optimisticUpdateDocument}
+              onOptimisticDeleteDocument={optimisticDeleteDocument}
               onNavigate={setActiveTab}
             />
           )}

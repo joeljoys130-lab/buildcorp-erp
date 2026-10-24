@@ -1,24 +1,20 @@
 "use server";
 
-import { cookies } from 'next/headers';
 import { dbService } from '@/lib/db-service';
-import { getTenantContextFromToken, assertPermission } from '@/lib/auth/tenant';
+import { resolveAuthenticatedTenant, assertPermission } from '@/lib/auth/tenant';
 import {
   CementLoad, Entry, StockRegisterItem, SiteMaterial,
   PrivateWork, TarLoad, WorkBasedEntry, Expense,
-  PublicWorksInsurance,
+  PublicWorksInsurance, PublicWorksDocument,
 } from '@/lib/types';
 import { deleteInsuranceDocument } from '@/lib/document-storage';
 
 // ── Auth & Tenant Context helper ───────────────────────────────────────────────
 
-/** Read the JWT cookie and return the active TenantContext. Throws if unauthorized. */
+/** Resolves the active TenantContext (via Clerk or legacy session). Throws if unauthorized. */
 async function getTenantContext() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('auth_token')?.value;
-  if (!token) throw new Error('Not authenticated');
-  const context = await getTenantContextFromToken(token);
-  if (!context) throw new Error('Invalid or expired session');
+  const context = await resolveAuthenticatedTenant();
+  if (!context) throw new Error('Not authenticated');
   return context;
 }
 
@@ -272,9 +268,40 @@ export async function deleteInsuranceDocumentAction(documentPath: string) {
   return { success: true };
 }
 
+// ── Public Works Documents ────────────────────────────────────────────────────
+
+export async function getPublicWorksDocumentsAction(filters?: { workId?: string; category?: string }) {
+  const ctx = await getTenantContext();
+  assertPermission(ctx, 'DOCUMENT_VIEW');
+  return dbService.getPublicWorksDocuments(ctx.email, filters);
+}
+
+export async function createPublicWorksDocumentAction(data: {
+  workId: string;
+  category: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  documentPath: string;
+  uploaderName?: string;
+}) {
+  const ctx = await getTenantContext();
+  assertPermission(ctx, 'DOCUMENT_CREATE');
+  return dbService.createPublicWorksDocument(
+    { ...data, uploaderName: ctx.name || ctx.email.split('@')[0], organizationId: ctx.organizationId },
+    ctx.email
+  );
+}
+
+export async function deletePublicWorksDocumentAction(id: string) {
+  const ctx = await getTenantContext();
+  assertPermission(ctx, 'DOCUMENT_DELETE');
+  return dbService.deletePublicWorksDocument(id, ctx.email);
+}
+
 export async function getDashboardDataAction() {
   const ctx = await getTenantContext();
-  const [cl, ent, stk, sm, pw, tl, wbe, exp, ins] = await Promise.all([
+  const [cl, ent, stk, sm, pw, tl, wbe, exp, ins, docs] = await Promise.all([
     dbService.getCementLoads(ctx.email),
     dbService.getEntries(ctx.email),
     dbService.getStockRegister(ctx.email),
@@ -284,6 +311,7 @@ export async function getDashboardDataAction() {
     dbService.getWorkBasedEntries(ctx.email),
     dbService.getExpenses(ctx.email),
     dbService.getPublicWorksInsurances(ctx.email),
+    dbService.getPublicWorksDocuments(ctx.email),
   ]);
   return {
     cementLoads: cl,
@@ -295,6 +323,7 @@ export async function getDashboardDataAction() {
     workBasedEntries: wbe,
     expenses: exp,
     insuranceRecords: ins,
+    documents: docs,
   };
 }
 

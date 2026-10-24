@@ -30,10 +30,11 @@ model User {
   id             String   @id @default(cuid()) @map("_id")
   email          String   @unique
   name           String
-  role           String   @default("ADMIN")
+  role           String   @default("VIEWER")
   password       String
   phoneNumber    String?  @unique
   organizationId String?
+  clerkId        String?  @unique
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 }
@@ -41,12 +42,13 @@ model User {
 // ── MULTI-TENANCY & SESSION MODELS ───────────────────────────────────────────
 
 model Organization {
-  id        String   @id @default(cuid()) @map("_id")
-  name      String
-  slug      String   @unique
-  plan      String   @default("PRO")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(cuid()) @map("_id")
+  name       String
+  slug       String   @unique
+  plan       String   @default("PRO")
+  clerkOrgId String?  @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 model OrganizationMember {
@@ -400,4 +402,29 @@ model InsuranceDocumentFile {
 
   @@index([ownerEmail])
   @@index([organizationId])
+}
+
+// ── MODULE — PUBLIC WORKS DOCUMENTS ──────────────────────────────────────────
+
+model PublicWorksDocument {
+  id             String    @id @default(cuid()) @map("_id")
+  organizationId String?
+  ownerEmail     String
+  workId         String
+  workName       String
+  category       String    // "TAR_BILL" | "SECURITY" | "ESTIMATE" | "SITE_PLAN" | "INSURANCE"
+  fileName       String
+  fileSize       Int
+  mimeType       String
+  documentPath   String    // db://<InsuranceDocumentFile.id>
+  uploaderEmail  String?
+  uploaderName   String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  @@index([ownerEmail])
+  @@index([organizationId])
+  @@index([workId])
+  @@index([category])
 }

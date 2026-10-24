@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import crypto from 'crypto';
 import { evaluateAndNotifyDlpEvents } from '@/lib/dlp-notifier';
-import { verifyAccessToken } from '@/lib/auth/jwt';
+import { resolveAuthenticatedTenantFromApiRequest } from '@/lib/auth/tenant';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST' && req.method !== 'GET') {
@@ -24,13 +24,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   if (!isCronAuthorized) {
-    const token = req.cookies.auth_token;
-    if (token) {
-      const decoded = verifyAccessToken(token) as { id: string; organizationId?: string } | null;
-      if (decoded) {
-        isAuthenticatedUser = true;
-        userOrgId = decoded.organizationId;
-      }
+    const tenantCtx = await resolveAuthenticatedTenantFromApiRequest(req);
+    if (tenantCtx) {
+      isAuthenticatedUser = true;
+      userOrgId = tenantCtx.organizationId;
     }
   }
 

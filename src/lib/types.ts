@@ -268,3 +268,30 @@ export interface InsuranceDocumentFile {
   createdAt: Date;
   deletedAt?: Date | null;
 }
+
+// MODULE — PUBLIC WORKS DOCUMENTS
+export type PublicWorksDocumentCategory =
+  | 'TAR_BILL'
+  | 'SECURITY'
+  | 'ESTIMATE'
+  | 'SITE_PLAN'
+  | 'INSURANCE';
+
+export interface PublicWorksDocument {
+  id: string;
+  organizationId?: string | null;
+  ownerEmail: string;
+  workId: string;
+  workName: string;
+  category: PublicWorksDocumentCategory | string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  documentPath: string;
+  uploaderEmail?: string | null;
+  uploaderName?: string | null;
+  createdAt: Date;
+  updatedAt?: Date;
+  deletedAt?: Date | null;
+}
+

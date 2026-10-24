@@ -1,18 +1,11 @@
-import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { getTenantContextFromToken } from '@/lib/auth/tenant';
+import { resolveAuthenticatedTenant } from '@/lib/auth/tenant';
 import { dbService } from '@/lib/db-service';
 import DashboardPortal from '@/components/dashboard-portal';
 
 export default async function Page() {
-  // ── Auth guard & stateless tenant context resolution ─────────────────────
-  const cookieStore = await cookies();
-  const token = cookieStore.get('auth_token')?.value;
-  if (!token) {
-    redirect('/login');
-  }
-
-  const ctx = await getTenantContextFromToken(token);
+  // ── Auth guard & stateless tenant context resolution (Clerk + Legacy) ───
+  const ctx = await resolveAuthenticatedTenant();
   if (!ctx) {
     redirect('/login');
   }
@@ -35,6 +28,7 @@ export default async function Page() {
     privateWorks,
     expenses,
     insuranceRecords,
+    publicWorksDocuments,
   ] = await Promise.all([
     dbService.getEntries(ctx.email),
     dbService.getCementLoads(ctx.email),
@@ -45,6 +39,7 @@ export default async function Page() {
     dbService.getPrivateWorks(ctx.email),
     dbService.getExpenses(ctx.email),
     dbService.getPublicWorksInsurances(ctx.email),
+    dbService.getPublicWorksDocuments(ctx.email),
   ]);
 
   const initialData = {
@@ -57,6 +52,7 @@ export default async function Page() {
     privateWorks,
     expenses,
     insuranceRecords,
+    publicWorksDocuments,
   };
 
   return <DashboardPortal initialUser={user} initialData={initialData} />;

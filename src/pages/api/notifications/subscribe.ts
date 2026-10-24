@@ -1,20 +1,15 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import prisma from '@/lib/prisma';
-import { verifyAccessToken } from '@/lib/auth/jwt';
+import { resolveAuthenticatedTenantFromApiRequest } from '@/lib/auth/tenant';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ success: false, error: 'Method not allowed' });
   }
 
-  const token = req.cookies.auth_token;
-  if (!token) {
+  const tenantCtx = await resolveAuthenticatedTenantFromApiRequest(req);
+  if (!tenantCtx) {
     return res.status(401).json({ success: false, error: 'Authentication required' });
-  }
-
-  const decoded = verifyAccessToken(token) as { id: string; email: string; organizationId?: string } | null;
-  if (!decoded) {
-    return res.status(401).json({ success: false, error: 'Invalid session' });
   }
 
   const { subscription } = req.body as {
@@ -31,14 +26,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const userAgent = req.headers['user-agent'] || undefined;
 
   try {
-    const user = await prisma.user.findUnique({ where: { id: decoded.id } });
-    const organizationId = user?.organizationId || decoded.organizationId || null;
+    const organizationId = tenantCtx.organizationId || null;
 
     const saved = await prisma.pushSubscription.upsert({
       where: { endpoint: subscription.endpoint },
       create: {
-        userId: decoded.id,
-        ownerEmail: decoded.email,
+        userId: tenantCtx.userId,
+        ownerEmail: tenantCtx.email,
         organizationId,
         endpoint: subscription.endpoint,
         p256dh: subscription.keys.p256dh,
@@ -46,8 +40,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         userAgent,
       },
       update: {
-        userId: decoded.id,
-        ownerEmail: decoded.email,
+        userId: tenantCtx.userId,
+        ownerEmail: tenantCtx.email,
         organizationId,
         p256dh: subscription.keys.p256dh,
         auth: subscription.keys.auth,

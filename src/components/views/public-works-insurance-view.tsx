@@ -49,6 +49,33 @@ const formatFileSize = (bytes?: number | null): string => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
+// Safe HTTP response parsing helper to gracefully handle non-JSON, empty, or HTML error responses
+async function parseResponseSafely(res: Response): Promise<{ success?: boolean; data?: any; error?: string }> {
+  let bodyText = "";
+  try {
+    bodyText = await res.text();
+  } catch {
+    bodyText = "";
+  }
+
+  if (bodyText) {
+    try {
+      return JSON.parse(bodyText);
+    } catch {
+      // Non-JSON or malformed response (e.g. HTML error page or truncated string)
+      const cleanSnippet = bodyText.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim().slice(0, 150);
+      return {
+        error: cleanSnippet || `Server returned HTTP ${res.status} ${res.statusText || 'Error'}`,
+      };
+    }
+  }
+
+  return {
+    error: `Server returned HTTP ${res.status} ${res.statusText || 'No response body'}`,
+  };
+}
+
+
 // Real-time Upload Progress Info
 export interface UploadProgressInfo {
   percent: number;
@@ -544,34 +571,42 @@ export function PublicWorksInsuranceView({
           `[DOC_UPLOAD] file="${safeName}" sizeBytes=${file.size} totalMs=${totalMs.toFixed(1)} (uploadMs=${uploadMs.toFixed(1)}, serverWaitMs=${serverWaitMs.toFixed(1)})`
         );
 
+        let data: any = null;
         try {
-          const data = JSON.parse(xhr.responseText);
-          if (xhr.status >= 200 && xhr.status < 300 && data.success) {
-            if (onProgress) {
-              onProgress({
-                percent: 100,
-                loadedBytes: file.size,
-                totalBytes: file.size,
-                statusText: "Upload complete!",
-                stage: 'complete',
-              });
-            }
-            resolve(data);
-          } else {
-            const errMsg = data.error || `Upload failed (HTTP ${xhr.status})`;
-            if (onProgress) {
-              onProgress({
-                percent: 0,
-                loadedBytes: 0,
-                totalBytes: file.size,
-                statusText: errMsg,
-                stage: 'error',
-              });
-            }
-            reject(new Error(errMsg));
-          }
+          data = xhr.responseText ? JSON.parse(xhr.responseText) : null;
         } catch {
-          reject(new Error(`Server error (${xhr.status}): ${xhr.statusText || 'Invalid response'}`));
+          // Malformed or non-JSON response (e.g. 405 Method Not Allowed, 502/504 Bad Gateway / Gateway Timeout)
+          const cleanSnippet = xhr.responseText
+            ? xhr.responseText.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim().slice(0, 150)
+            : '';
+          data = {
+            error: cleanSnippet || `Server error (${xhr.status}): ${xhr.statusText || 'Invalid response'}`,
+          };
+        }
+
+        if (xhr.status >= 200 && xhr.status < 300 && data?.success) {
+          if (onProgress) {
+            onProgress({
+              percent: 100,
+              loadedBytes: file.size,
+              totalBytes: file.size,
+              statusText: "Upload complete!",
+              stage: 'complete',
+            });
+          }
+          resolve(data);
+        } else {
+          const errMsg = data?.error || `Upload failed (HTTP ${xhr.status}${xhr.statusText ? `: ${xhr.statusText}` : ''})`;
+          if (onProgress) {
+            onProgress({
+              percent: 0,
+              loadedBytes: 0,
+              totalBytes: file.size,
+              statusText: errMsg,
+              stage: 'error',
+            });
+          }
+          reject(new Error(errMsg));
         }
       };
 
@@ -850,9 +885,9 @@ export function PublicWorksInsuranceView({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(docPayload),
           });
-          const resData = await res.json();
-          if (!res.ok || !resData.success) {
-            throw new Error(resData.error || "Failed to create document record.");
+          const resData = await parseResponseSafely(res);
+          if (!res.ok || !resData?.success) {
+            throw new Error(resData?.error || `Failed to create document record (HTTP ${res.status})`);
           }
           createdDoc = resData.data;
         }
@@ -929,9 +964,9 @@ export function PublicWorksInsuranceView({
         const res = await fetch(`/api/insurance/work-documents/${deleteConfirmDoc.id}`, {
           method: "DELETE",
         });
-        const resData = await res.json();
-        if (!res.ok || !resData.success) {
-          throw new Error(resData.error || "Failed to delete document.");
+        const resData = await parseResponseSafely(res);
+        if (!res.ok || !resData?.success) {
+          throw new Error(resData?.error || `Failed to delete document (HTTP ${res.status})`);
         }
       }
 

@@ -15,13 +15,22 @@
 
 import path from 'path';
 import fs from 'fs';
+import { randomBytes } from 'crypto';
 import prisma from './prisma';
+import { PerformanceTracker } from './performance-timing';
 
 // Maximum allowed document size (10 MB)
 export const MAX_DOCUMENT_SIZE = 10 * 1024 * 1024;
 
-// 512 KB chunk size for efficient binary streaming and storage
-const CHUNK_SIZE = 512 * 1024;
+// 2 MB chunk size for optimized binary transfer and reduced BSON array / string allocation overhead
+const CHUNK_SIZE = 2 * 1024 * 1024;
+
+/**
+ * Generates a collision-resistant 25-character storage ID compatible with cuid format.
+ */
+export function generateStorageId(): string {
+  return 'c' + Date.now().toString(36) + randomBytes(8).toString('hex').slice(0, 16);
+}
 
 // Allowed MIME types and extensions
 export const ALLOWED_MIME_TYPES = new Set([
@@ -149,8 +158,21 @@ function bufferToChunks(buffer: Buffer): string[] {
 
 /**
  * Reassembles an array of Base64 chunks back into a contiguous Buffer.
+ * Uses zero-intermediate-copy direct buffer decoding when expectedSize is provided.
  */
-function chunksToBuffer(chunks: string[]): Buffer {
+function chunksToBuffer(chunks: string[], expectedSize?: number): Buffer {
+  if (!chunks || chunks.length === 0) return Buffer.alloc(0);
+
+  if (expectedSize && expectedSize > 0) {
+    const target = Buffer.allocUnsafe(expectedSize);
+    let writeOffset = 0;
+    for (let i = 0; i < chunks.length; i++) {
+      writeOffset += target.write(chunks[i], writeOffset, 'base64');
+    }
+    return target;
+  }
+
+  // Fallback for variable or unknown sizes
   const buffers = chunks.map((c) => Buffer.from(c, 'base64'));
   return Buffer.concat(buffers);
 }
@@ -164,15 +186,22 @@ export async function saveInsuranceDocument(
   originalFilename: string,
   declaredMimeType: string,
   ownerEmail: string,
-  organizationId?: string | null
+  organizationId?: string | null,
+  customId?: string
 ): Promise<{
   documentName: string;
   documentPath: string;
   documentMimeType: string;
   documentSize: number;
 }> {
+  const tracker = new PerformanceTracker('saveDocument');
+
+  tracker.startMarker('validation');
   const validation = validateDocumentContent(buffer, originalFilename, declaredMimeType);
+  tracker.endMarker('validation');
+
   if (!validation.isValid) {
+    tracker.finish(false, { error: 'validation_failed' });
     throw new Error(validation.error || 'Invalid document file');
   }
 
@@ -180,11 +209,19 @@ export async function saveInsuranceDocument(
   const sanitizedOriginalName = path.basename(originalFilename).replace(/[^a-zA-Z0-9._\- ]/g, '_');
 
   // Convert buffer into persistent storage chunks
+  tracker.startMarker('chunking');
   const chunks = bufferToChunks(buffer);
+  tracker.endMarker('chunking');
 
-  // Store in persistent MongoDB Atlas collection
+  const fileId = customId || generateStorageId();
+
+  // Store in persistent MongoDB Atlas collection.
+  // Using select: { id: true } avoids transmitting the entire multi-MB chunks array
+  // back from MongoDB Atlas in the create response!
+  tracker.startMarker('dbWrite');
   const storedFile = await prisma.insuranceDocumentFile.create({
     data: {
+      id: fileId,
       ownerEmail,
       organizationId: organizationId || null,
       fileName: sanitizedOriginalName,
@@ -192,9 +229,18 @@ export async function saveInsuranceDocument(
       fileSize: buffer.length,
       chunks,
     },
+    select: {
+      id: true,
+    },
   });
+  tracker.endMarker('dbWrite');
 
   const documentPath = `db://${storedFile.id}`;
+
+  tracker.finish(true, {
+    sizeBytes: buffer.length,
+    chunks: chunks.length,
+  });
 
   return {
     documentName: sanitizedOriginalName,
@@ -202,6 +248,42 @@ export async function saveInsuranceDocument(
     documentMimeType: mimeType,
     documentSize: buffer.length,
   };
+}
+
+/**
+ * Retrieves document metadata without loading heavy binary chunks over the database network.
+ */
+export async function getInsuranceDocumentMetadata(
+  documentPath: string,
+  ownerEmail?: string
+): Promise<{
+  id: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  ownerEmail: string;
+  createdAt: Date;
+} | null> {
+  if (!documentPath || !documentPath.startsWith('db://')) return null;
+
+  const fileId = documentPath.replace('db://', '');
+  const record = await prisma.insuranceDocumentFile.findUnique({
+    where: { id: fileId },
+    select: {
+      id: true,
+      ownerEmail: true,
+      fileName: true,
+      mimeType: true,
+      fileSize: true,
+      createdAt: true,
+      deletedAt: true,
+    },
+  });
+
+  if (!record || record.deletedAt) return null;
+  if (ownerEmail && record.ownerEmail !== ownerEmail) return null;
+
+  return record;
 }
 
 /**
@@ -220,30 +302,48 @@ export async function getInsuranceDocument(
     throw new Error('Invalid document path');
   }
 
+  const tracker = new PerformanceTracker('getDocument');
+
   // 1. Persistent Database Storage Path (db://<id>)
   if (documentPath.startsWith('db://')) {
     const fileId = documentPath.replace('db://', '');
-    const whereClause: Record<string, unknown> = {
-      id: fileId,
-      OR: [
-        { deletedAt: { isSet: false } },
-        { deletedAt: null },
-      ],
-    };
 
-    if (ownerEmail) {
-      whereClause.ownerEmail = ownerEmail;
-    }
-
-    const fileRecord = await prisma.insuranceDocumentFile.findFirst({
-      where: whereClause,
+    // Clustered primary index lookup on _id is O(1)
+    tracker.startMarker('dbRead');
+    const fileRecord = await prisma.insuranceDocumentFile.findUnique({
+      where: { id: fileId },
+      select: {
+        id: true,
+        ownerEmail: true,
+        fileName: true,
+        mimeType: true,
+        fileSize: true,
+        chunks: true,
+        deletedAt: true,
+      },
     });
+    tracker.endMarker('dbRead');
 
-    if (!fileRecord || !fileRecord.chunks || fileRecord.chunks.length === 0) {
+    if (!fileRecord || fileRecord.deletedAt || !fileRecord.chunks || fileRecord.chunks.length === 0) {
+      tracker.finish(false, { error: 'not_found' });
       throw new Error('Document file not found on persistent storage');
     }
 
-    const buffer = chunksToBuffer(fileRecord.chunks);
+    // Strict tenant isolation
+    if (ownerEmail && fileRecord.ownerEmail !== ownerEmail) {
+      tracker.finish(false, { error: 'unauthorized_tenant' });
+      throw new Error('Document file not found on persistent storage');
+    }
+
+    tracker.startMarker('decodeChunks');
+    const buffer = chunksToBuffer(fileRecord.chunks, fileRecord.fileSize);
+    tracker.endMarker('decodeChunks');
+
+    tracker.finish(true, {
+      sizeBytes: buffer.length,
+      chunks: fileRecord.chunks.length,
+    });
+
     return {
       buffer,
       fileName: fileRecord.fileName,
@@ -308,3 +408,10 @@ export async function deleteInsuranceDocument(
     console.warn('Failed to delete document file:', err);
   }
 }
+
+// ── Public Works Documents Storage Aliases ──────────────────────────────────
+export const savePublicWorksDocument = saveInsuranceDocument;
+export const getPublicWorksDocument = getInsuranceDocument;
+export const getPublicWorksDocumentMetadata = getInsuranceDocumentMetadata;
+export const deletePublicWorksDocument = deleteInsuranceDocument;
+

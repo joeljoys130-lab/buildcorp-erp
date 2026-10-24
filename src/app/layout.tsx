@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, Outfit } from "next/font/google";
+import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 
 const inter = Inter({
@@ -17,12 +18,14 @@ export const metadata: Metadata = {
   description: "Next-gen ERP platform for contracts, work orders, material tracking, stock, and project execution management.",
 };
 
+const hasClerkKey = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return (
+  const htmlContent = (
     <html
       lang="en"
       className={`${inter.variable} ${outfit.variable} h-full antialiased`}
@@ -34,4 +37,10 @@ export default function RootLayout({
       </body>
     </html>
   );
+
+  if (hasClerkKey) {
+    return <ClerkProvider dynamic>{htmlContent}</ClerkProvider>;
+  }
+
+  return htmlContent;
 }
