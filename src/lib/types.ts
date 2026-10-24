@@ -268,3 +268,21 @@ export interface InsuranceDocumentFile {
   createdAt: Date;
   deletedAt?: Date | null;
 }
+
+export interface PublicWorksDocument {
+  id: string;
+  organizationId?: string | null;
+  ownerEmail: string;
+  workId: string;
+  workName: string;
+  category: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  documentPath: string;
+  uploaderName?: string | null;
+  uploaderEmail?: string | null;
+  createdAt: Date;
+  updatedAt?: Date;
+  deletedAt?: Date | null;
+}
