@@ -62,8 +62,8 @@ export async function resolveAuthenticatedTenant(explicitToken?: string): Promis
     process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ||
     'pk_test_c2hhcnAtcGlnbGV0LTg0ODEuY2xlcmsuYWNjb3VudHMuZGV2JA';
 
-  // 1. Attempt Clerk authentication first if configured
-  if (clerkPublishableKey || process.env.CLERK_SECRET_KEY) {
+  // 1. Attempt Clerk authentication first if secret key is configured
+  if (process.env.CLERK_SECRET_KEY) {
     try {
       const { auth, currentUser } = await import('@clerk/nextjs/server');
       const clerkAuth = await auth();

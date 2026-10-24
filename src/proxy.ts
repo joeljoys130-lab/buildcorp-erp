@@ -22,7 +22,7 @@ const isPublicRoute = (pathname: string): boolean => {
 const CLERK_PUBLISHABLE_KEY =
   process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ||
   'pk_test_c2hhcnAtcGlnbGV0LTg0ODEuY2xlcmsuYWNjb3VudHMuZGV2JA';
-const hasClerkKey = Boolean(CLERK_PUBLISHABLE_KEY);
+const hasClerkServer = Boolean(process.env.CLERK_SECRET_KEY);
 
 const legacyHandler = (request: NextRequest) => {
   const { pathname } = request.nextUrl;
@@ -35,7 +35,7 @@ const legacyHandler = (request: NextRequest) => {
   return NextResponse.next();
 };
 
-const clerkHandler = hasClerkKey
+const clerkHandler = hasClerkServer
   ? clerkMiddleware(
       async (auth, request) => {
         const { pathname } = request.nextUrl;
