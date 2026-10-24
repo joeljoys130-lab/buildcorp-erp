@@ -1,7 +1,14 @@
 import { NextResponse } from 'next/server';
 import { resolveAuthenticatedTenant, assertPermission } from '@/lib/auth/tenant';
 import path from 'path';
-import { saveInsuranceDocument, deleteInsuranceDocument, generateStorageId } from '@/lib/document-storage';
+import {
+  saveInsuranceDocument,
+  deleteInsuranceDocument,
+  generateStorageId,
+  validateDocumentContent,
+  initChunkedInsuranceDocument,
+  appendInsuranceDocumentChunk,
+} from '@/lib/document-storage';
 import { dbService } from '@/lib/db-service';
 import prisma from '@/lib/prisma';
 
@@ -11,12 +18,16 @@ import { hasPermission } from '@/lib/auth/rbac';
 
 export async function POST(request: Request) {
   const tracker = new PerformanceTracker('apiUpload');
+  let currentStorageId: string | null = null;
+  let currentUserEmail: string | null = null;
+
   try {
     tracker.startMarker('auth');
     const tenantCtx = await resolveAuthenticatedTenant();
     if (!tenantCtx) {
       return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     }
+    currentUserEmail = tenantCtx.email;
 
     // Must have document create or insurance create permissions
     if (!hasPermission(tenantCtx.role, 'DOCUMENT_CREATE') && !hasPermission(tenantCtx.role, 'INSURANCE_CREATE')) {
@@ -27,116 +38,188 @@ export async function POST(request: Request) {
     }
     tracker.endMarker('auth');
 
-    // Early reject oversized payloads exceeding 10 MB before parsing body into memory
-    const contentLength = Number(request.headers.get('content-length') || 0);
-    if (contentLength > 10 * 1024 * 1024 + 65536) {
-      return NextResponse.json({ error: 'File size exceeds the 10 MB upload limit.' }, { status: 400 });
-    }
-
     tracker.startMarker('parsePayload');
     let formData: FormData;
     try {
       formData = await request.formData();
     } catch {
-      return NextResponse.json({ error: 'File size exceeds the 10 MB upload limit.' }, { status: 400 });
+      return NextResponse.json({ error: 'File size exceeds upload limit or malformed form data.' }, { status: 400 });
     }
+
     const file = formData.get('file') as File | null;
     const workId = formData.get('workId') as string | null;
     const category = formData.get('category') as string | null;
+    const chunkIndex = parseInt((formData.get('chunkIndex') as string) || '0', 10);
+    const totalChunks = parseInt((formData.get('totalChunks') as string) || '1', 10);
+    const uploadId = (formData.get('uploadId') as string) || null;
+    const rawFileName = (formData.get('fileName') as string) || file?.name || 'document';
+    const declaredFileSize = parseInt(
+      (formData.get('fileSize') as string) || (file ? `${file.size}` : '0'),
+      10
+    );
+    const declaredMimeType = (formData.get('mimeType') as string) || file?.type || 'application/octet-stream';
 
     if (!file) {
       return NextResponse.json({ error: 'No document file provided.' }, { status: 400 });
     }
 
+    // Strictly enforce 10 MB maximum file size limit
+    if (declaredFileSize > 10 * 1024 * 1024) {
+      return NextResponse.json({ error: 'File size exceeds the 10 MB upload limit.' }, { status: 400 });
+    }
+
     const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    const chunkBuffer = Buffer.from(arrayBuffer);
     tracker.endMarker('parsePayload');
 
     tracker.startMarker('saveStorageAndMetadata');
-    const storageId = generateStorageId();
-    const documentPath = `db://${storageId}`;
-    const sanitizedOriginalName = path.basename(file.name).replace(/[^a-zA-Z0-9._\- ]/g, '_');
+    const sanitizedOriginalName = path.basename(rawFileName).replace(/[^a-zA-Z0-9._\- ]/g, '_');
 
-    let savedDoc;
-    let documentRecord = null;
+    // Case 1: Initial chunk (or single-chunk upload)
+    if (chunkIndex === 0) {
+      const storageId = uploadId || generateStorageId();
+      currentStorageId = storageId;
+      const documentPath = `db://${storageId}`;
 
-    let storageMs = 0;
-    let metaMs = 0;
+      // Initialize chunked storage record in MongoDB Atlas (and validate magic bytes on chunk 0)
+      const storedDoc = await initChunkedInsuranceDocument(
+        storageId,
+        chunkBuffer,
+        sanitizedOriginalName,
+        declaredMimeType,
+        declaredFileSize > 0 ? declaredFileSize : chunkBuffer.length,
+        tenantCtx.email,
+        tenantCtx.organizationId
+      );
 
-    try {
-      if (workId && category) {
-        const t0 = performance.now();
-        const pStorage = saveInsuranceDocument(
-          buffer,
-          file.name,
-          file.type,
-          tenantCtx.email,
-          tenantCtx.organizationId,
-          storageId
-        ).then((r) => {
-          storageMs = performance.now() - t0;
-          return r;
+      // If this is a single-chunk upload, finalize immediately
+      if (totalChunks <= 1) {
+        let documentRecord = null;
+        if (workId && category) {
+          documentRecord = await dbService.createPublicWorksDocument(
+            {
+              workId,
+              category,
+              fileName: sanitizedOriginalName,
+              fileSize: storedDoc.documentSize,
+              mimeType: storedDoc.documentMimeType,
+              documentPath,
+              uploaderName: tenantCtx.name || tenantCtx.email.split('@')[0],
+              organizationId: tenantCtx.organizationId,
+            },
+            tenantCtx.email
+          );
+        }
+
+        tracker.endMarker('saveStorageAndMetadata');
+        tracker.finish(true, {
+          fileSize: storedDoc.documentSize,
+          hasRecord: Boolean(documentRecord),
+          chunks: 1,
         });
 
-        const pMeta = dbService.createPublicWorksDocument(
+        const response = NextResponse.json({
+          success: true,
+          uploadId: storageId,
+          document: storedDoc,
+          record: documentRecord,
+        });
+        response.headers.set('Server-Timing', tracker.getServerTimingHeader());
+        return response;
+      }
+
+      // Multi-chunk upload in progress: Return uploadId for subsequent chunks
+      tracker.endMarker('saveStorageAndMetadata');
+      tracker.finish(true, {
+        chunkIndex: 0,
+        totalChunks,
+      });
+
+      const response = NextResponse.json({
+        success: true,
+        uploadId: storageId,
+        chunkIndex: 0,
+        totalChunks,
+      });
+      response.headers.set('Server-Timing', tracker.getServerTimingHeader());
+      return response;
+    }
+
+    // Case 2: Subsequent chunks (chunkIndex > 0)
+    if (!uploadId) {
+      return NextResponse.json({ error: 'uploadId is required for chunk upload.' }, { status: 400 });
+    }
+    currentStorageId = uploadId;
+    const documentPath = `db://${uploadId}`;
+
+    // Append chunk to persistent MongoDB Atlas InsuranceDocumentFile record
+    const updatedDoc = await appendInsuranceDocumentChunk(uploadId, chunkBuffer, tenantCtx.email);
+
+    // If final chunk reached, create metadata record if workId & category provided
+    if (chunkIndex === totalChunks - 1) {
+      let documentRecord = null;
+      if (workId && category) {
+        documentRecord = await dbService.createPublicWorksDocument(
           {
             workId,
             category,
-            fileName: sanitizedOriginalName,
-            fileSize: buffer.length,
-            mimeType: file.type || 'application/octet-stream',
+            fileName: updatedDoc.documentName,
+            fileSize: updatedDoc.documentSize,
+            mimeType: updatedDoc.documentMimeType,
             documentPath,
             uploaderName: tenantCtx.name || tenantCtx.email.split('@')[0],
             organizationId: tenantCtx.organizationId,
           },
           tenantCtx.email
-        ).then((r) => {
-          metaMs = performance.now() - t0;
-          return r;
-        });
-
-        const [storageRes, metaRes] = await Promise.all([pStorage, pMeta]);
-        savedDoc = storageRes;
-        documentRecord = metaRes;
-        tracker.record('storageWrite', storageMs);
-        tracker.record('metadataWrite', metaMs);
-      } else {
-        savedDoc = await saveInsuranceDocument(
-          buffer,
-          file.name,
-          file.type,
-          tenantCtx.email,
-          tenantCtx.organizationId,
-          storageId
         );
       }
-    } catch (err: any) {
-      // Rollback on any failure to guarantee zero orphaned records or storage chunks
-      await Promise.allSettled([
-        deleteInsuranceDocument(documentPath, tenantCtx.email),
-        prisma.publicWorksDocument.deleteMany({
-          where: { documentPath, ownerEmail: tenantCtx.email },
-        }),
-      ]);
-      throw err;
-    }
-    tracker.endMarker('saveStorageAndMetadata');
 
+      tracker.endMarker('saveStorageAndMetadata');
+      tracker.finish(true, {
+        fileSize: updatedDoc.documentSize,
+        hasRecord: Boolean(documentRecord),
+        chunks: totalChunks,
+      });
+
+      const response = NextResponse.json({
+        success: true,
+        uploadId,
+        document: updatedDoc,
+        record: documentRecord,
+      });
+      response.headers.set('Server-Timing', tracker.getServerTimingHeader());
+      return response;
+    }
+
+    // Intermediate chunk saved successfully
+    tracker.endMarker('saveStorageAndMetadata');
     tracker.finish(true, {
-      fileSize: buffer.length,
-      hasRecord: Boolean(documentRecord),
+      chunkIndex,
+      totalChunks,
     });
 
     const response = NextResponse.json({
       success: true,
-      document: savedDoc,
-      record: documentRecord,
+      uploadId,
+      chunkIndex,
+      totalChunks,
     });
     response.headers.set('Server-Timing', tracker.getServerTimingHeader());
     return response;
   } catch (error: any) {
     tracker.finish(false, { error: error.message || 'unknown' });
     console.error('Error uploading document:', error);
+
+    // Rollback orphaned chunks if an upload was aborted mid-stream
+    if (currentStorageId && currentUserEmail) {
+      await Promise.allSettled([
+        deleteInsuranceDocument(`db://${currentStorageId}`, currentUserEmail),
+        prisma.publicWorksDocument.deleteMany({
+          where: { documentPath: `db://${currentStorageId}`, ownerEmail: currentUserEmail },
+        }),
+      ]);
+    }
+
     const errMsg = error.message || '';
     const isClientError =
       errMsg.includes('Unsupported') ||

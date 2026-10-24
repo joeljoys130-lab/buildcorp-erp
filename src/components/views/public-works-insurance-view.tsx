@@ -501,7 +501,7 @@ export function PublicWorksInsuranceView({
     }
   };
 
-  const uploadFileToServer = (
+  const uploadFileToServer = async (
     file: File,
     workId?: string,
     category?: string,
@@ -515,116 +515,152 @@ export function PublicWorksInsuranceView({
     };
     record?: PublicWorksDocument | null;
   }> => {
-    return new Promise((resolve, reject) => {
-      const startTime = performance.now();
-      let uploadFinishedTime = 0;
-      const xhr = new XMLHttpRequest();
-      xhr.open("POST", "/api/insurance/upload");
-      xhr.timeout = 60000; // 60s safety timeout for multi-MB files
+    // 2 MB chunk size: guarantees each HTTP request body is ~2 MB, well below Netlify's 6 MB ceiling
+    const CHUNK_SIZE = 2 * 1024 * 1024;
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE) || 1;
+    let uploadId: string | null = null;
+    const startTime = performance.now();
 
+    if (onProgress) {
+      onProgress({
+        percent: 0,
+        loadedBytes: 0,
+        totalBytes: file.size,
+        statusText: "Preparing upload...",
+        stage: 'preparing',
+      });
+    }
+
+    try {
+      let finalResult: any = null;
+
+      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+        const start = chunkIndex * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, file.size);
+        const chunkBlob = file.slice(start, end);
+
+        const chunkResult = await new Promise<any>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", "/api/insurance/upload");
+          xhr.timeout = 60000;
+
+          xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable && onProgress) {
+              const currentChunkLoaded = event.loaded;
+              const totalLoaded = Math.min(file.size, start + currentChunkLoaded);
+              const percent = Math.min(99, Math.round((totalLoaded / file.size) * 100));
+
+              if (percent >= 99 && chunkIndex === totalChunks - 1) {
+                onProgress({
+                  percent: 99,
+                  loadedBytes: totalLoaded,
+                  totalBytes: file.size,
+                  statusText: "Saving chunks to persistent storage...",
+                  stage: 'processing',
+                });
+              } else {
+                onProgress({
+                  percent,
+                  loadedBytes: totalLoaded,
+                  totalBytes: file.size,
+                  statusText: `Uploading: ${percent}% (${formatFileSize(totalLoaded)} / ${formatFileSize(file.size)})${totalChunks > 1 ? ` (Part ${chunkIndex + 1} of ${totalChunks})` : ''}`,
+                  stage: 'uploading',
+                });
+              }
+            }
+          };
+
+          xhr.onload = () => {
+            let data: any = null;
+            try {
+              data = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+            } catch {
+              const cleanSnippet = xhr.responseText
+                ? xhr.responseText.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim().slice(0, 150)
+                : '';
+              data = {
+                error: cleanSnippet || `Server error (${xhr.status}): ${xhr.statusText || 'Invalid response'}`,
+              };
+            }
+
+            if (xhr.status >= 200 && xhr.status < 300 && data?.success) {
+              resolve(data);
+            } else {
+              const errMsg = data?.error || `Upload failed (HTTP ${xhr.status}${xhr.statusText ? `: ${xhr.statusText}` : ''})`;
+              reject(new Error(errMsg));
+            }
+          };
+
+          xhr.onerror = () => {
+            reject(new Error("Network error during document upload. Please check your connection."));
+          };
+
+          xhr.ontimeout = () => {
+            reject(new Error("Upload timed out after 60 seconds. Please try again."));
+          };
+
+          const formData = new FormData();
+          formData.append("file", chunkBlob, file.name);
+          formData.append("chunkIndex", chunkIndex.toString());
+          formData.append("totalChunks", totalChunks.toString());
+          formData.append("fileName", file.name);
+          formData.append("fileSize", file.size.toString());
+          formData.append("mimeType", file.type || 'application/octet-stream');
+          if (uploadId) {
+            formData.append("uploadId", uploadId);
+          }
+          if (workId) formData.append("workId", workId);
+          if (category) formData.append("category", category);
+
+          xhr.send(formData);
+        });
+
+        if (chunkIndex === 0 && chunkResult.uploadId) {
+          uploadId = chunkResult.uploadId;
+        }
+
+        if (chunkIndex === totalChunks - 1) {
+          finalResult = chunkResult;
+        }
+      }
+
+      const totalMs = performance.now() - startTime;
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      console.info(
+        `[DOC_UPLOAD] file="${safeName}" sizeBytes=${file.size} chunks=${totalChunks} totalMs=${totalMs.toFixed(1)}`
+      );
+
+      if (onProgress) {
+        onProgress({
+          percent: 100,
+          loadedBytes: file.size,
+          totalBytes: file.size,
+          statusText: "Upload complete!",
+          stage: 'complete',
+        });
+      }
+
+      return finalResult;
+    } catch (err: any) {
+      if (uploadId) {
+        // Rollback uploaded chunks
+        fetch('/api/insurance/upload', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ documentPath: `db://${uploadId}` }),
+        }).catch(() => {});
+      }
       if (onProgress) {
         onProgress({
           percent: 0,
           loadedBytes: 0,
           totalBytes: file.size,
-          statusText: "Preparing upload...",
-          stage: 'preparing',
+          statusText: err.message || "Upload failed",
+          stage: 'error',
         });
       }
-
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable && onProgress) {
-          const percent = Math.min(99, Math.round((event.loaded / event.total) * 100));
-          if (percent >= 99) {
-            uploadFinishedTime = performance.now();
-            onProgress({
-              percent: 99,
-              loadedBytes: event.loaded,
-              totalBytes: event.total,
-              statusText: "Saving chunks to persistent storage...",
-              stage: 'processing',
-            });
-          } else {
-            onProgress({
-              percent,
-              loadedBytes: event.loaded,
-              totalBytes: event.total,
-              statusText: `Uploading: ${percent}% (${formatFileSize(event.loaded)} / ${formatFileSize(event.total)})`,
-              stage: 'uploading',
-            });
-          }
-        }
-      };
-
-      xhr.upload.onload = () => {
-        if (!uploadFinishedTime) uploadFinishedTime = performance.now();
-      };
-
-      xhr.onload = () => {
-        const totalMs = performance.now() - startTime;
-        const uploadMs = (uploadFinishedTime || performance.now()) - startTime;
-        const serverWaitMs = Math.max(0, totalMs - uploadMs);
-
-        // Safe timing measurement without sensitive info
-        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-        console.info(
-          `[DOC_UPLOAD] file="${safeName}" sizeBytes=${file.size} totalMs=${totalMs.toFixed(1)} (uploadMs=${uploadMs.toFixed(1)}, serverWaitMs=${serverWaitMs.toFixed(1)})`
-        );
-
-        let data: any = null;
-        try {
-          data = xhr.responseText ? JSON.parse(xhr.responseText) : null;
-        } catch {
-          // Malformed or non-JSON response (e.g. 405 Method Not Allowed, 502/504 Bad Gateway / Gateway Timeout)
-          const cleanSnippet = xhr.responseText
-            ? xhr.responseText.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim().slice(0, 150)
-            : '';
-          data = {
-            error: cleanSnippet || `Server error (${xhr.status}): ${xhr.statusText || 'Invalid response'}`,
-          };
-        }
-
-        if (xhr.status >= 200 && xhr.status < 300 && data?.success) {
-          if (onProgress) {
-            onProgress({
-              percent: 100,
-              loadedBytes: file.size,
-              totalBytes: file.size,
-              statusText: "Upload complete!",
-              stage: 'complete',
-            });
-          }
-          resolve(data);
-        } else {
-          const errMsg = data?.error || `Upload failed (HTTP ${xhr.status}${xhr.statusText ? `: ${xhr.statusText}` : ''})`;
-          if (onProgress) {
-            onProgress({
-              percent: 0,
-              loadedBytes: 0,
-              totalBytes: file.size,
-              statusText: errMsg,
-              stage: 'error',
-            });
-          }
-          reject(new Error(errMsg));
-        }
-      };
-
-      xhr.onerror = () => {
-        reject(new Error("Network error during document upload. Please check your connection."));
-      };
-
-      xhr.ontimeout = () => {
-        reject(new Error("Upload timed out after 60 seconds. Please try again."));
-      };
-
-      const formData = new FormData();
-      formData.append("file", file);
-      if (workId) formData.append("workId", workId);
-      if (category) formData.append("category", category);
-
-      xhr.send(formData);
-    });
+      throw err;
+    }
   };
 
   const handleInsuranceSubmit = async (e: React.FormEvent) => {

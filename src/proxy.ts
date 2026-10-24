@@ -19,7 +19,10 @@ const isPublicRoute = (pathname: string): boolean => {
   return PUBLIC_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 };
 
-const hasClerkKey = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+const CLERK_PUBLISHABLE_KEY =
+  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ||
+  'pk_test_c2hhcnAtcGlnbGV0LTg0ODEuY2xlcmsuYWNjb3VudHMuZGV2JA';
+const hasClerkKey = Boolean(CLERK_PUBLISHABLE_KEY);
 
 const legacyHandler = (request: NextRequest) => {
   const { pathname } = request.nextUrl;
@@ -33,18 +36,23 @@ const legacyHandler = (request: NextRequest) => {
 };
 
 const clerkHandler = hasClerkKey
-  ? clerkMiddleware(async (auth, request) => {
-      const { pathname } = request.nextUrl;
+  ? clerkMiddleware(
+      async (auth, request) => {
+        const { pathname } = request.nextUrl;
 
-      // If not a public route, enforce authentication
-      if (!isPublicRoute(pathname)) {
-        // Check if legacy authentication token is present to ensure seamless migration
-        const legacyToken = request.cookies.get('auth_token')?.value;
-        if (!legacyToken) {
-          await auth.protect();
+        // If not a public route, enforce authentication
+        if (!isPublicRoute(pathname)) {
+          // Check if legacy authentication token is present to ensure seamless migration
+          const legacyToken = request.cookies.get('auth_token')?.value;
+          if (!legacyToken) {
+            await auth.protect();
+          }
         }
+      },
+      {
+        publishableKey: CLERK_PUBLISHABLE_KEY,
       }
-    })
+    )
   : legacyHandler;
 
 // Support both Next.js 16 named `proxy` export and default export

@@ -2,12 +2,15 @@ import '@/styles/globals.css';
 import type { AppProps } from 'next/app';
 import { ClerkProvider } from '@clerk/nextjs';
 
-const hasClerkKey = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+const CLERK_PUBLISHABLE_KEY =
+  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ||
+  'pk_test_c2hhcnAtcGlnbGV0LTg0ODEuY2xlcmsuYWNjb3VudHMuZGV2JA';
+const hasClerkKey = Boolean(CLERK_PUBLISHABLE_KEY);
 
 export default function MyApp({ Component, pageProps }: AppProps) {
   if (hasClerkKey) {
     return (
-      <ClerkProvider {...pageProps}>
+      <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} {...pageProps}>
         <Component {...pageProps} />
       </ClerkProvider>
     );

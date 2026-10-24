@@ -58,8 +58,12 @@ export async function getTenantContextFromToken(token?: string): Promise<TenantC
  * falling back to legacy JWT cookie if Clerk session is absent.
  */
 export async function resolveAuthenticatedTenant(explicitToken?: string): Promise<TenantContext | null> {
+  const clerkPublishableKey =
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ||
+    'pk_test_c2hhcnAtcGlnbGV0LTg0ODEuY2xlcmsuYWNjb3VudHMuZGV2JA';
+
   // 1. Attempt Clerk authentication first if configured
-  if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || process.env.CLERK_SECRET_KEY) {
+  if (clerkPublishableKey || process.env.CLERK_SECRET_KEY) {
     try {
       const { auth, currentUser } = await import('@clerk/nextjs/server');
       const clerkAuth = await auth();

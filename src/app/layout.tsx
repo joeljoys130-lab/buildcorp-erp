@@ -18,7 +18,10 @@ export const metadata: Metadata = {
   description: "Next-gen ERP platform for contracts, work orders, material tracking, stock, and project execution management.",
 };
 
-const hasClerkKey = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+const CLERK_PUBLISHABLE_KEY =
+  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ||
+  'pk_test_c2hhcnAtcGlnbGV0LTg0ODEuY2xlcmsuYWNjb3VudHMuZGV2JA';
+const hasClerkKey = Boolean(CLERK_PUBLISHABLE_KEY);
 
 export default function RootLayout({
   children,
@@ -39,7 +42,11 @@ export default function RootLayout({
   );
 
   if (hasClerkKey) {
-    return <ClerkProvider dynamic>{htmlContent}</ClerkProvider>;
+    return (
+      <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} dynamic>
+        {htmlContent}
+      </ClerkProvider>
+    );
   }
 
   return htmlContent;

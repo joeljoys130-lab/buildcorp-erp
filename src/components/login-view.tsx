@@ -10,7 +10,10 @@ interface LoginViewProps {
 
 type AuthStep = "login" | "otp" | "forgot-email" | "forgot-otp" | "forgot-reset";
 
-const hasClerkKey = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+const CLERK_PUBLISHABLE_KEY =
+  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ||
+  'pk_test_c2hhcnAtcGlnbGV0LTg0ODEuY2xlcmsuYWNjb3VudHMuZGV2JA';
+const hasClerkKey = Boolean(CLERK_PUBLISHABLE_KEY);
 
 export default function LoginView({ onLoginSuccess }: LoginViewProps) {
   const router = useRouter();

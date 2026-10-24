@@ -3,8 +3,14 @@ import path from 'path';
 import { dbService } from '@/lib/db-service';
 import { resolveAuthenticatedTenant } from '@/lib/auth/tenant';
 import { hasPermission } from '@/lib/auth/rbac';
-import { saveInsuranceDocument, deleteInsuranceDocument, generateStorageId } from '@/lib/document-storage';
 import prisma from '@/lib/prisma';
+import {
+  saveInsuranceDocument,
+  deleteInsuranceDocument,
+  generateStorageId,
+  initChunkedInsuranceDocument,
+  appendInsuranceDocumentChunk,
+} from '@/lib/document-storage';
 import { PerformanceTracker } from '@/lib/performance-timing';
 
 export async function GET(request: Request) {
@@ -79,11 +85,20 @@ export async function POST(request: Request) {
       try {
         formData = await request.formData();
       } catch {
-        return NextResponse.json({ error: 'File size exceeds the 10 MB upload limit.' }, { status: 400 });
+        return NextResponse.json({ error: 'File size exceeds upload limit or malformed form data.' }, { status: 400 });
       }
       const file = formData.get('file') as File | null;
       const workId = formData.get('workId') as string | null;
       const category = formData.get('category') as string | null;
+      const chunkIndex = parseInt((formData.get('chunkIndex') as string) || '0', 10);
+      const totalChunks = parseInt((formData.get('totalChunks') as string) || '1', 10);
+      const uploadId = (formData.get('uploadId') as string) || null;
+      const rawFileName = (formData.get('fileName') as string) || file?.name || 'document';
+      const declaredFileSize = parseInt(
+        (formData.get('fileSize') as string) || (file ? `${file.size}` : '0'),
+        10
+      );
+      const declaredMimeType = (formData.get('mimeType') as string) || file?.type || 'application/octet-stream';
 
       if (!file) {
         return NextResponse.json({ error: 'No document file provided.' }, { status: 400 });
@@ -95,66 +110,160 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Document category is required.' }, { status: 400 });
       }
 
+      if (declaredFileSize > 10 * 1024 * 1024) {
+        return NextResponse.json({ error: 'File size exceeds the 10 MB upload limit.' }, { status: 400 });
+      }
+
       const arrayBuffer = await file.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
+      const chunkBuffer = Buffer.from(arrayBuffer);
       tracker.endMarker('parsePayload');
 
       tracker.startMarker('saveStorageAndMetadata');
-      const storageId = generateStorageId();
-      const documentPath = `db://${storageId}`;
-      const sanitizedOriginalName = path.basename(file.name).replace(/[^a-zA-Z0-9._\- ]/g, '_');
+      const sanitizedOriginalName = path.basename(rawFileName).replace(/[^a-zA-Z0-9._\- ]/g, '_');
 
-      let savedDoc;
-      let created;
+      if (chunkIndex === 0) {
+        const storageId = uploadId || generateStorageId();
+        const documentPath = `db://${storageId}`;
 
-      try {
-        const [storageRes, metaRes] = await Promise.all([
-          saveInsuranceDocument(
-            buffer,
-            file.name,
-            file.type,
-            tenantCtx.email,
-            tenantCtx.organizationId,
-            storageId
-          ),
-          dbService.createPublicWorksDocument(
+        const storedDoc = await initChunkedInsuranceDocument(
+          storageId,
+          chunkBuffer,
+          sanitizedOriginalName,
+          declaredMimeType,
+          declaredFileSize > 0 ? declaredFileSize : chunkBuffer.length,
+          tenantCtx.email,
+          tenantCtx.organizationId
+        );
+
+        if (totalChunks <= 1) {
+          let created;
+          try {
+            created = await dbService.createPublicWorksDocument(
+              {
+                workId,
+                category,
+                fileName: sanitizedOriginalName,
+                fileSize: storedDoc.documentSize,
+                mimeType: storedDoc.documentMimeType,
+                documentPath,
+                uploaderName: tenantCtx.name || tenantCtx.email.split('@')[0],
+                organizationId: tenantCtx.organizationId,
+              },
+              tenantCtx.email
+            );
+          } catch (err: any) {
+            await Promise.allSettled([
+              deleteInsuranceDocument(documentPath, tenantCtx.email),
+              prisma.publicWorksDocument.deleteMany({
+                where: { documentPath, ownerEmail: tenantCtx.email },
+              }),
+            ]);
+            throw err;
+          }
+
+          tracker.endMarker('saveStorageAndMetadata');
+          tracker.finish(true, {
+            fileSize: storedDoc.documentSize,
+            hasRecord: true,
+            chunks: 1,
+          });
+
+          const response = NextResponse.json(
+            {
+              success: true,
+              data: created,
+              document: storedDoc,
+            },
+            { status: 201 }
+          );
+          response.headers.set('Server-Timing', tracker.getServerTimingHeader());
+          return response;
+        }
+
+        // Multi-chunk in progress
+        tracker.endMarker('saveStorageAndMetadata');
+        tracker.finish(true, {
+          chunkIndex: 0,
+          totalChunks,
+        });
+
+        const response = NextResponse.json(
+          {
+            success: true,
+            uploadId: storageId,
+            chunkIndex: 0,
+            totalChunks,
+          },
+          { status: 201 }
+        );
+        response.headers.set('Server-Timing', tracker.getServerTimingHeader());
+        return response;
+      }
+
+      // Subsequent chunks
+      if (!uploadId) {
+        return NextResponse.json({ error: 'uploadId is required for chunk upload.' }, { status: 400 });
+      }
+      const documentPath = `db://${uploadId}`;
+      const updatedDoc = await appendInsuranceDocumentChunk(uploadId, chunkBuffer, tenantCtx.email);
+
+      if (chunkIndex === totalChunks - 1) {
+        let created;
+        try {
+          created = await dbService.createPublicWorksDocument(
             {
               workId,
               category,
-              fileName: sanitizedOriginalName,
-              fileSize: buffer.length,
-              mimeType: file.type || 'application/octet-stream',
+              fileName: updatedDoc.documentName,
+              fileSize: updatedDoc.documentSize,
+              mimeType: updatedDoc.documentMimeType,
               documentPath,
               uploaderName: tenantCtx.name || tenantCtx.email.split('@')[0],
               organizationId: tenantCtx.organizationId,
             },
             tenantCtx.email
-          ),
-        ]);
-        savedDoc = storageRes;
-        created = metaRes;
-      } catch (err: any) {
-        // Rollback on any failure to guarantee zero orphaned records or storage chunks
-        await Promise.allSettled([
-          deleteInsuranceDocument(documentPath, tenantCtx.email),
-          prisma.publicWorksDocument.deleteMany({
-            where: { documentPath, ownerEmail: tenantCtx.email },
-          }),
-        ]);
-        throw err;
-      }
-      tracker.endMarker('saveStorageAndMetadata');
+          );
+        } catch (err: any) {
+          await Promise.allSettled([
+            deleteInsuranceDocument(documentPath, tenantCtx.email),
+            prisma.publicWorksDocument.deleteMany({
+              where: { documentPath, ownerEmail: tenantCtx.email },
+            }),
+          ]);
+          throw err;
+        }
 
+        tracker.endMarker('saveStorageAndMetadata');
+        tracker.finish(true, {
+          fileSize: updatedDoc.documentSize,
+          hasRecord: true,
+          chunks: totalChunks,
+        });
+
+        const response = NextResponse.json(
+          {
+            success: true,
+            data: created,
+            document: updatedDoc,
+          },
+          { status: 201 }
+        );
+        response.headers.set('Server-Timing', tracker.getServerTimingHeader());
+        return response;
+      }
+
+      tracker.endMarker('saveStorageAndMetadata');
       tracker.finish(true, {
-        fileSize: buffer.length,
-        hasRecord: true,
+        chunkIndex,
+        totalChunks,
       });
 
       const response = NextResponse.json(
         {
           success: true,
-          data: created,
-          document: savedDoc,
+          uploadId,
+          chunkIndex,
+          totalChunks,
         },
         { status: 201 }
       );

@@ -415,3 +415,102 @@ export const getPublicWorksDocument = getInsuranceDocument;
 export const getPublicWorksDocumentMetadata = getInsuranceDocumentMetadata;
 export const deletePublicWorksDocument = deleteInsuranceDocument;
 
+/**
+ * Initializes a chunked document storage record with the first binary chunk.
+ * Validates document magic bytes and extension on the initial chunk.
+ */
+export async function initChunkedInsuranceDocument(
+  storageId: string,
+  chunkBuffer: Buffer,
+  originalFilename: string,
+  declaredMimeType: string,
+  declaredFileSize: number,
+  ownerEmail: string,
+  organizationId?: string | null
+): Promise<{
+  documentName: string;
+  documentPath: string;
+  documentMimeType: string;
+  documentSize: number;
+}> {
+  if (declaredFileSize > MAX_DOCUMENT_SIZE) {
+    throw new Error(`File size (${(declaredFileSize / (1024 * 1024)).toFixed(1)} MB) exceeds the 10 MB limit.`);
+  }
+
+  const validation = validateDocumentContent(chunkBuffer, originalFilename, declaredMimeType);
+  if (!validation.isValid) {
+    throw new Error(validation.error || 'Invalid document file');
+  }
+
+  const mimeType = validation.detectedMimeType || declaredMimeType;
+  const sanitizedOriginalName = path.basename(originalFilename).replace(/[^a-zA-Z0-9._\- ]/g, '_');
+  const chunkBase64 = chunkBuffer.toString('base64');
+
+  await prisma.insuranceDocumentFile.create({
+    data: {
+      id: storageId,
+      ownerEmail,
+      organizationId: organizationId || null,
+      fileName: sanitizedOriginalName,
+      mimeType,
+      fileSize: declaredFileSize,
+      chunks: [chunkBase64],
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  return {
+    documentName: sanitizedOriginalName,
+    documentPath: `db://${storageId}`,
+    documentMimeType: mimeType,
+    documentSize: declaredFileSize,
+  };
+}
+
+/**
+ * Appends a binary chunk to an existing chunked document storage record.
+ * Validates tenant ownership.
+ */
+export async function appendInsuranceDocumentChunk(
+  storageId: string,
+  chunkBuffer: Buffer,
+  ownerEmail: string
+): Promise<{
+  documentName: string;
+  documentPath: string;
+  documentMimeType: string;
+  documentSize: number;
+}> {
+  const existing = await prisma.insuranceDocumentFile.findUnique({
+    where: { id: storageId },
+    select: { id: true, ownerEmail: true, fileName: true, mimeType: true, fileSize: true },
+  });
+
+  if (!existing || existing.ownerEmail !== ownerEmail) {
+    throw new Error('Document file not found on persistent storage');
+  }
+
+  const chunkBase64 = chunkBuffer.toString('base64');
+  await prisma.insuranceDocumentFile.update({
+    where: { id: storageId },
+    data: {
+      chunks: {
+        push: chunkBase64,
+      },
+    },
+    select: { id: true },
+  });
+
+  return {
+    documentName: existing.fileName,
+    documentPath: `db://${storageId}`,
+    documentMimeType: existing.mimeType,
+    documentSize: existing.fileSize,
+  };
+}
+
+export const initChunkedPublicWorksDocument = initChunkedInsuranceDocument;
+export const appendPublicWorksDocumentChunk = appendInsuranceDocumentChunk;
+
