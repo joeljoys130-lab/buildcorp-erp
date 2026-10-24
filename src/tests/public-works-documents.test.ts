@@ -360,7 +360,7 @@ async function runPublicWorksDocumentsTests() {
       emptyParsedError = `THREW: ${e.message}`;
     }
     assert(
-      !emptyParsedError?.includes('Unexpected end of JSON input') && emptyParsedError?.includes('405'),
+      Boolean(!emptyParsedError?.includes('Unexpected end of JSON input') && emptyParsedError?.includes('405')),
       '11a. Empty response (HTTP 405) handled safely without "Unexpected end of JSON input" crash'
     );
 
@@ -379,7 +379,7 @@ async function runPublicWorksDocumentsTests() {
       htmlParsedError = `THREW: ${e.message}`;
     }
     assert(
-      !htmlParsedError?.includes('SyntaxError') && htmlParsedError?.includes('502 Bad Gateway'),
+      Boolean(!htmlParsedError?.includes('SyntaxError') && htmlParsedError?.includes('502 Bad Gateway')),
       '11b. HTML error response (HTTP 502) stripped of tags and handled cleanly'
     );
 
